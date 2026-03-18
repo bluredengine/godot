@@ -2361,8 +2361,12 @@ void AIAssistantDock::_on_wizard_local_health_completed(int p_result, int p_code
 			Label *status = Object::cast_to<Label>(status_row->get_child(0));
 			if (status) {
 				if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
-					status->set_text("Service not running");
-					status->add_theme_color_override("font_color", Color(1, 0, 0));
+					if (p_provider_id == "local_rmbg") {
+						status->set_text("Not available -- ask AI to 'install local providers'");
+					} else {
+						status->set_text("Not installed -- ask AI to 'install local providers'");
+					}
+					status->add_theme_color_override("font_color", Color(1, 0.5, 0));
 				} else {
 					status->set_text("Connected!");
 					status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
