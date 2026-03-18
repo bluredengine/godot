@@ -33,8 +33,10 @@
 #include "core/config/project_settings.h"
 #include "core/extension/gdextension_manager.h"
 #include "core/input/input.h"
+#include "core/io/ai_asset_metadata.h"
 #include "core/io/config_file.h"
 #include "core/io/file_access.h"
+#include "core/io/json.h"
 #include "core/io/image.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
@@ -88,6 +90,9 @@
 #include "editor/docks/groups_dock.h"
 #include "editor/docks/history_dock.h"
 #include "editor/docks/import_dock.h"
+#include "editor/ai_asset_generation_manager.h"
+#include "editor/plugins/ai_assistant/ai_assistant_manager.h"
+#include "editor/plugins/art_director/art_director_dock.h"
 #include "editor/docks/inspector_dock.h"
 #include "editor/docks/scene_tree_dock.h"
 #include "editor/docks/signals_dock.h"
@@ -133,6 +138,7 @@
 #include "editor/import/resource_importer_texture.h"
 #include "editor/import/resource_importer_texture_atlas.h"
 #include "editor/import/resource_importer_wav.h"
+#include "editor/inspector/ai_asset_inspector_plugin.h"
 #include "editor/inspector/editor_inspector.h"
 #include "editor/inspector/editor_preview_plugins.h"
 #include "editor/inspector/editor_properties.h"
@@ -567,6 +573,96 @@ void EditorNode::_update_from_settings() {
 	NavigationServer3D::get_singleton()->set_debug_navigation_enable_edge_lines_xray(GLOBAL_GET("debug/shapes/navigation/3d/enable_edge_lines_xray"));
 	NavigationServer3D::get_singleton()->set_debug_navigation_enable_geometry_face_random_color(GLOBAL_GET("debug/shapes/navigation/3d/enable_geometry_face_random_color"));
 #endif // DEBUG_ENABLED
+}
+
+void EditorNode::_sync_ai_provider_settings() {
+	if (!EditorSettings::get_singleton()) {
+		return;
+	}
+
+	bool auto_sync = EDITOR_GET("ai/server/auto_sync_config");
+	if (!auto_sync) {
+		return;
+	}
+
+	// Build provider config from EditorSettings
+	Dictionary providers;
+
+	// Replicate
+	if (EDITOR_GET("ai/providers/replicate/enabled")) {
+		Dictionary replicate;
+		String api_key = EDITOR_GET("ai/providers/replicate/api_key");
+		if (!api_key.is_empty()) {
+			replicate["api_key"] = api_key;
+		}
+		String api_url = EDITOR_GET("ai/providers/replicate/api_url");
+		if (!api_url.is_empty()) {
+			replicate["api_url"] = api_url;
+		}
+		replicate["enabled"] = true;
+		providers["replicate"] = replicate;
+	}
+
+	// Meshy
+	if (EDITOR_GET("ai/providers/meshy/enabled")) {
+		Dictionary meshy;
+		String api_key = EDITOR_GET("ai/providers/meshy/api_key");
+		if (!api_key.is_empty()) {
+			meshy["api_key"] = api_key;
+		}
+		String api_url = EDITOR_GET("ai/providers/meshy/api_url");
+		if (!api_url.is_empty()) {
+			meshy["api_url"] = api_url;
+		}
+		meshy["enabled"] = true;
+		providers["meshy"] = meshy;
+	}
+
+	// Doubao
+	if (EDITOR_GET("ai/providers/doubao/enabled")) {
+		Dictionary doubao;
+		String api_key = EDITOR_GET("ai/providers/doubao/api_key");
+		if (!api_key.is_empty()) {
+			doubao["api_key"] = api_key;
+		}
+		String api_url = EDITOR_GET("ai/providers/doubao/api_url");
+		if (!api_url.is_empty()) {
+			doubao["api_url"] = api_url;
+		}
+		doubao["enabled"] = true;
+		providers["doubao"] = doubao;
+	}
+
+	// Suno
+	if (EDITOR_GET("ai/providers/suno/enabled")) {
+		Dictionary suno;
+		String api_key = EDITOR_GET("ai/providers/suno/api_key");
+		if (!api_key.is_empty()) {
+			suno["api_key"] = api_key;
+		}
+		String api_url = EDITOR_GET("ai/providers/suno/api_url");
+		if (!api_url.is_empty()) {
+			suno["api_url"] = api_url;
+		}
+		suno["enabled"] = true;
+		providers["suno"] = suno;
+	}
+
+	// Build full config — write under "asset_provider" key to match OpenCode's initFromConfig()
+	Dictionary config;
+	config["$schema"] = "https://opencode.ai/config.schema.json";
+
+	config["asset_provider"] = providers;
+
+	// Write to project root as opencode.json (not .jsonc — Config.update() uses .json)
+	String project_path = ProjectSettings::get_singleton()->get_resource_path();
+	String config_path = project_path.path_join("opencode.json");
+
+	Ref<FileAccess> f = FileAccess::open(config_path, FileAccess::WRITE);
+	if (f.is_valid()) {
+		f->store_string(JSON::stringify(config, "  "));
+		f->flush();
+	}
 }
 
 void EditorNode::_gdextensions_reloaded() {
@@ -1515,7 +1611,11 @@ void EditorNode::_scan_external_changes() {
 	}
 
 	if (need_reload) {
-		callable_mp((Window *)disk_changed, &Window::popup_centered_ratio).call_deferred(0.3);
+		// Auto-reload without confirmation dialog (Makabaka: AI modifies scenes externally)
+		callable_mp(this, &EditorNode::_reload_modified_scenes).call_deferred();
+		if (disk_changed_project) {
+			callable_mp(this, &EditorNode::_reload_project_settings).call_deferred();
+		}
 	}
 }
 
@@ -6901,7 +7001,19 @@ void EditorNode::_add_dropped_files_recursive(const Vector<String> &p_files, Str
 			continue;
 		}
 
-		dir->copy(from, to);
+		Error err = dir->copy(from, to);
+		if (err == OK) {
+			// Write AI asset import metadata for tracking origin
+			String res_path = ProjectSettings::get_singleton()->localize_path(to);
+			Ref<FileAccess> file_check = FileAccess::open(from, FileAccess::READ);
+			int64_t file_size = file_check.is_valid() ? file_check->get_length() : 0;
+
+			Dictionary import_meta = AIAssetMetadata::create_import_metadata(
+					from,
+					from.get_file(),
+					file_size);
+			AIAssetMetadata::set_metadata(res_path, import_meta);
+		}
 	}
 }
 
@@ -8244,6 +8356,10 @@ EditorNode::EditorNode() {
 
 	_update_vsync_mode();
 
+	// Sync AI provider settings to opencode.jsonc on startup.
+	EditorSettings::get_singleton()->connect("settings_changed", callable_mp(this, &EditorNode::_sync_ai_provider_settings));
+	_sync_ai_provider_settings();
+
 	// Warm up the project upgrade tool as early as possible.
 	project_upgrade_tool = memnew(ProjectUpgradeTool);
 	run_project_upgrade_tool = EditorSettings::get_singleton()->get_project_metadata(project_upgrade_tool->META_PROJECT_UPGRADE_TOOL, project_upgrade_tool->META_RUN_ON_RESTART, false);
@@ -8428,6 +8544,10 @@ EditorNode::EditorNode() {
 		Ref<EditorInspectorParticleProcessMaterialPlugin> ppm;
 		ppm.instantiate();
 		EditorInspector::add_inspector_plugin(ppm);
+
+		Ref<AIAssetInspectorPlugin> ai_asset_plugin;
+		ai_asset_plugin.instantiate();
+		EditorInspector::add_inspector_plugin(ai_asset_plugin);
 	}
 
 	editor_selection = memnew(EditorSelection);
@@ -8954,6 +9074,14 @@ EditorNode::EditorNode() {
 	history_dock = memnew(HistoryDock);
 	editor_dock_manager->add_dock(history_dock);
 
+	ai_assistant_manager = memnew(AIAssistantManager);
+	ai_assistant_manager->create_primary_dock();
+	ai_assistant_manager->restore_state();
+
+	// AI Asset Generation Manager (singleton, not a dock)
+	AIAssetGenerationManager *ai_gen_manager = memnew(AIAssetGenerationManager);
+	add_child(ai_gen_manager);
+
 	// Add some offsets to make LEFT_R and RIGHT_L docks wider than minsize.
 	const int dock_hsize = 280;
 	// By default there is only 3 visible, so set 2 split offsets for them.
@@ -8967,7 +9095,15 @@ EditorNode::EditorNode() {
 	// Dock numbers are based on DockSlot enum value + 1.
 	default_layout->set_value(docks_section, "dock_3", "Scene,Import");
 	default_layout->set_value(docks_section, "dock_4", "FileSystem,History");
-	default_layout->set_value(docks_section, "dock_5", "Inspector,Signals,Groups");
+	default_layout->set_value(docks_section, "dock_5", "AI #1,Inspector,Signals,Groups");
+
+	// Hide Import, History, Signals, and Groups docks by default.
+	Array closed_docks;
+	closed_docks.push_back("Import");
+	closed_docks.push_back("History");
+	closed_docks.push_back("Signals");
+	closed_docks.push_back("Groups");
+	default_layout->set_value(docks_section, "dock_closed", closed_docks);
 
 	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
 	for (int i = 0; i < (int)std_size(hsplits); i++) {
@@ -9154,6 +9290,11 @@ EditorNode::EditorNode() {
 	} else {
 		print_verbose("Asset Library not available (due to using Web editor, or SSL support disabled).");
 	}
+
+	// Art Director — main screen tab. Registered AFTER built-in editors (2D/3D/Script/Game/AssetLib)
+	// so that the hardcoded EditorTable enum indices (EDITOR_2D=0, EDITOR_3D=1, etc.) remain valid.
+	ArtDirectorPlugin *art_director_plugin = memnew(ArtDirectorPlugin);
+	add_editor_plugin(art_director_plugin);
 
 	// More visually meaningful to have this later.
 	add_editor_plugin(memnew(AnimationPlayerEditorPlugin));
@@ -9394,6 +9535,10 @@ EditorNode::~EditorNode() {
 	memdelete(editor_plugins_force_input_forwarding);
 	memdelete(progress_hb);
 	memdelete(project_upgrade_tool);
+	if (ai_assistant_manager) {
+		ai_assistant_manager->save_state();
+		memdelete(ai_assistant_manager);
+	}
 	memdelete(editor_dock_manager);
 
 	EditorSettings::destroy();

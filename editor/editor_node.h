@@ -95,6 +95,7 @@ class EditorQuickOpenDialog;
 class FBXImporterManager;
 class FileSystemDock;
 class HistoryDock;
+class AIAssistantManager;
 class OrphanResourcesDialog;
 class ProgressDialog;
 class ProjectExportDialog;
@@ -271,6 +272,7 @@ private:
 	EditorSelection *editor_selection = nullptr;
 	EditorSettingsDialog *editor_settings_dialog = nullptr;
 	HistoryDock *history_dock = nullptr;
+	AIAssistantManager *ai_assistant_manager = nullptr;
 
 	ProjectExportDialog *project_export = nullptr;
 	ProjectSettingsEditor *project_settings_editor = nullptr;
@@ -619,6 +621,7 @@ private:
 
 	void _update_vsync_mode();
 	void _update_from_settings();
+	void _sync_ai_provider_settings();
 	void _gdextensions_reloaded();
 	void _update_translations();
 	void _translation_resources_changed();

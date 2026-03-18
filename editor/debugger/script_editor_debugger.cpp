@@ -959,6 +959,25 @@ void ScriptEditorDebugger::_msg_evaluation_return(uint64_t p_thread_id, const Ar
 	expression_evaluator->add_value(p_data);
 }
 
+void ScriptEditorDebugger::set_ai_eval_callback(const Callable &p_callback) {
+	ai_eval_callback = p_callback;
+}
+
+void ScriptEditorDebugger::request_ai_eval(const String &p_expression, const String &p_eval_id, const Callable &p_callback) {
+	ai_eval_callback = p_callback;
+	Array msg = { p_expression, p_eval_id };
+	_put_msg("ai:eval", msg);
+}
+
+void ScriptEditorDebugger::_msg_ai_eval_return(uint64_t p_thread_id, const Array &p_data) {
+	// p_data: [eval_id, value_string, error_string]
+	if (ai_eval_callback.is_valid()) {
+		Callable cb = ai_eval_callback;
+		ai_eval_callback = Callable(); // One-shot.
+		cb.call(p_data);
+	}
+}
+
 void ScriptEditorDebugger::_msg_window_title(uint64_t p_thread_id, const Array &p_data) {
 	ERR_FAIL_COND(p_data.size() != 1);
 	emit_signal(SNAME("remote_window_title_changed"), p_data[0]);
@@ -970,6 +989,10 @@ void ScriptEditorDebugger::_msg_embed_suspend_toggle(uint64_t p_thread_id, const
 
 void ScriptEditorDebugger::_msg_embed_next_frame(uint64_t p_thread_id, const Array &p_data) {
 	emit_signal(SNAME("embed_shortcut_requested"), EMBED_NEXT_FRAME);
+}
+
+void ScriptEditorDebugger::_msg_ai_toggle_gif_recording(uint64_t p_thread_id, const Array &p_data) {
+	emit_signal(SNAME("embed_shortcut_requested"), EMBED_AI_TOGGLE_GIF);
 }
 
 void ScriptEditorDebugger::_parse_message(const String &p_msg, uint64_t p_thread_id, const Array &p_data) {
@@ -1023,9 +1046,11 @@ void ScriptEditorDebugger::_init_parse_message_handlers() {
 	parse_message_handlers["performance:profile_names"] = &ScriptEditorDebugger::_msg_performance_profile_names;
 	parse_message_handlers["filesystem:update_file"] = &ScriptEditorDebugger::_msg_filesystem_update_file;
 	parse_message_handlers["evaluation_return"] = &ScriptEditorDebugger::_msg_evaluation_return;
+	parse_message_handlers["ai:eval_return"] = &ScriptEditorDebugger::_msg_ai_eval_return;
 	parse_message_handlers["window:title"] = &ScriptEditorDebugger::_msg_window_title;
 	parse_message_handlers["request_embed_suspend_toggle"] = &ScriptEditorDebugger::_msg_embed_suspend_toggle;
 	parse_message_handlers["request_embed_next_frame"] = &ScriptEditorDebugger::_msg_embed_next_frame;
+	parse_message_handlers["request_ai_toggle_gif_recording"] = &ScriptEditorDebugger::_msg_ai_toggle_gif_recording;
 }
 
 void ScriptEditorDebugger::_set_reason_text(const String &p_reason, MessageType p_type) {
@@ -1534,6 +1559,32 @@ bool ScriptEditorDebugger::is_move_to_foreground() const {
 
 void ScriptEditorDebugger::set_move_to_foreground(const bool &p_move_to_foreground) {
 	move_to_foreground = p_move_to_foreground;
+}
+
+String ScriptEditorDebugger::get_error_text(int p_max_items) const {
+	if (!error_tree) {
+		return String();
+	}
+	TreeItem *root = error_tree->get_root();
+	if (!root) {
+		return String();
+	}
+	String result;
+	int count = 0;
+	TreeItem *item = root->get_first_child();
+	while (item && count < p_max_items) {
+		String prefix;
+		if (item->has_meta("_is_error")) {
+			prefix = "[ERROR] ";
+		} else if (item->has_meta("_is_warning")) {
+			prefix = "[WARNING] ";
+		}
+		// column 0 = time, column 1 = error title
+		result += prefix + item->get_text(0) + " " + item->get_text(1) + "\n";
+		item = item->get_next();
+		count++;
+	}
+	return result;
 }
 
 String ScriptEditorDebugger::get_stack_script_file() const {

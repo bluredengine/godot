@@ -112,8 +112,8 @@ private:
 	int error_count;
 	int warning_count;
 
-	bool skip_breakpoints_value = false;
-	bool ignore_error_breaks_value = false;
+	bool skip_breakpoints_value = true;
+	bool ignore_error_breaks_value = true;
 	Ref<Script> stack_script;
 
 	TabContainer *tabs = nullptr;
@@ -156,6 +156,10 @@ private:
 	EditorVisualProfiler *visual_profiler = nullptr;
 	EditorPerformanceProfiler *performance_profiler = nullptr;
 	EditorExpressionEvaluator *expression_evaluator = nullptr;
+
+	// AI eval callback — when set, the next evaluation_return is forwarded to this callback
+	// instead of (in addition to) the expression evaluator UI.
+	Callable ai_eval_callback;
 
 	OS::ProcessID remote_pid = 0;
 	bool move_to_foreground = true;
@@ -233,9 +237,11 @@ private:
 	void _msg_performance_profile_names(uint64_t p_thread_id, const Array &p_data);
 	void _msg_filesystem_update_file(uint64_t p_thread_id, const Array &p_data);
 	void _msg_evaluation_return(uint64_t p_thread_id, const Array &p_data);
+	void _msg_ai_eval_return(uint64_t p_thread_id, const Array &p_data);
 	void _msg_window_title(uint64_t p_thread_id, const Array &p_data);
 	void _msg_embed_suspend_toggle(uint64_t p_thread_id, const Array &p_data);
 	void _msg_embed_next_frame(uint64_t p_thread_id, const Array &p_data);
+	void _msg_ai_toggle_gif_recording(uint64_t p_thread_id, const Array &p_data);
 
 	void _parse_message(const String &p_msg, uint64_t p_thread_id, const Array &p_data);
 	void _set_reason_text(const String &p_reason, MessageType p_type);
@@ -301,6 +307,7 @@ public:
 	enum EmbedShortcutAction {
 		EMBED_SUSPEND_TOGGLE,
 		EMBED_NEXT_FRAME,
+		EMBED_AI_TOGGLE_GIF,
 	};
 
 	void request_remote_objects(const TypedArray<uint64_t> &p_obj_ids, bool p_update_selection = true);
@@ -315,6 +322,8 @@ public:
 	const SceneDebuggerTree *get_remote_tree();
 
 	void request_remote_evaluate(const String &p_expression, int p_stack_frame);
+	void request_ai_eval(const String &p_expression, const String &p_eval_id, const Callable &p_callback);
+	void set_ai_eval_callback(const Callable &p_callback);
 
 	void start(Ref<RemoteDebuggerPeer> p_peer);
 	void stop();
@@ -338,6 +347,7 @@ public:
 
 	int get_error_count() const { return error_count; }
 	int get_warning_count() const { return warning_count; }
+	String get_error_text(int p_max_items = 20) const;
 	String get_stack_script_file() const;
 	int get_stack_script_line() const;
 	int get_stack_script_frame() const;
