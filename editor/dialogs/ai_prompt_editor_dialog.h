@@ -2,10 +2,10 @@
 /*  ai_prompt_editor_dialog.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
-/*                  https://github.com/makabaka-engine                    */
+/*                           BLURED ENGINE                              */
+/*                  https://github.com/bluredengine                    */
 /**************************************************************************/
-/* Copyright (c) 2024 Makabaka Engine Contributors                        */
+/* Copyright (c) 2024 Blured Engine Contributors                        */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */

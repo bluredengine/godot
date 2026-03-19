@@ -80,6 +80,14 @@
 // Example: "Godot v3.1.4.stable.official.mono.double"
 #define GODOT_VERSION_FULL_NAME GODOT_VERSION_NAME " v" GODOT_VERSION_FULL_BUILD
 
+// Blured Engine version (separate from Godot compatibility version).
+#if BLURED_VERSION_PATCH
+#define BLURED_VERSION_NUMBER _MKSTR(BLURED_VERSION_MAJOR) "." _MKSTR(BLURED_VERSION_MINOR) "." _MKSTR(BLURED_VERSION_PATCH)
+#else
+#define BLURED_VERSION_NUMBER _MKSTR(BLURED_VERSION_MAJOR) "." _MKSTR(BLURED_VERSION_MINOR)
+#endif
+#define BLURED_VERSION_FULL BLURED_VERSION_NUMBER "-" BLURED_VERSION_STATUS
+
 // Git commit hash, generated at build time in `core/version_hash.gen.cpp`.
 extern const char *const GODOT_VERSION_HASH;
 

@@ -2,7 +2,7 @@
 /*  art_director_dock.cpp                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
+/*                           BLURED ENGINE                              */
 /*                    AI-powered game creation module                     */
 /**************************************************************************/
 
@@ -23,6 +23,13 @@
 // =============================================================================
 
 ArtDirectorPanel::ArtDirectorPanel() {
+	// Read port from BLURED_AI_PORT env var (default 13700)
+	String port = OS::get_singleton()->get_environment("BLURED_AI_PORT");
+	if (port.is_empty()) {
+		port = "13700";
+	}
+	service_url = "http://localhost:" + port;
+
 	set_h_size_flags(SIZE_EXPAND_FILL);
 	set_v_size_flags(SIZE_EXPAND_FILL);
 	_setup_ui();
@@ -220,6 +227,10 @@ String ArtDirectorPanel::_abs_path_from_res(const String &p_res_path) const {
 }
 
 void ArtDirectorPanel::_refresh_profile() {
+	if (profile_request_in_progress) {
+		return;
+	}
+	profile_request_in_progress = true;
 	String dir = _get_project_root().uri_encode();
 	String url = service_url + "/godot/art-director/profile?directory=" + dir;
 	PackedStringArray headers;
@@ -240,6 +251,10 @@ void ArtDirectorPanel::_refresh_images() {
 }
 
 void ArtDirectorPanel::_refresh_models() {
+	if (models_request_in_progress) {
+		return;
+	}
+	models_request_in_progress = true;
 	String url = service_url + "/godot/art-director/models";
 	PackedStringArray headers;
 	models_http_request->request(url, headers);
@@ -377,6 +392,7 @@ void ArtDirectorPanel::_rebuild_exploration_gallery() {
 // ── HTTP callbacks ─────────────────────────────────────────────────────────────
 
 void ArtDirectorPanel::_on_profile_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
+	profile_request_in_progress = false;
 	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
 		selected_style_label->set_text(TTR("Style: (server not available)"));
 		return;
@@ -509,6 +525,7 @@ void ArtDirectorPanel::_on_images_completed(int p_result, int p_code, const Pack
 }
 
 void ArtDirectorPanel::_on_models_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
+	models_request_in_progress = false;
 	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
 		struct ModelEntry { const char *id; const char *label; };
 		static const ModelEntry FALLBACK_MODELS[] = {

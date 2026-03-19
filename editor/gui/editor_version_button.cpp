@@ -37,16 +37,16 @@ String _get_version_string(EditorVersionButton::VersionFormat p_format) {
 	String main;
 	switch (p_format) {
 		case EditorVersionButton::FORMAT_BASIC: {
-			return GODOT_VERSION_FULL_CONFIG;
+			return "Blured " BLURED_VERSION_FULL " (Godot " GODOT_VERSION_FULL_CONFIG ")";
 		} break;
 		case EditorVersionButton::FORMAT_WITH_BUILD: {
-			main = "v" GODOT_VERSION_FULL_BUILD;
+			main = "Blured v" BLURED_VERSION_FULL " (Godot v" GODOT_VERSION_FULL_BUILD ")";
 		} break;
 		case EditorVersionButton::FORMAT_WITH_NAME_AND_BUILD: {
-			main = GODOT_VERSION_FULL_NAME;
+			main = "Blured v" BLURED_VERSION_FULL " (Godot v" GODOT_VERSION_FULL_BUILD ")";
 		} break;
 		default: {
-			ERR_FAIL_V_MSG(GODOT_VERSION_FULL_NAME, "Unexpected format: " + itos(p_format));
+			ERR_FAIL_V_MSG("Blured " BLURED_VERSION_FULL, "Unexpected format: " + itos(p_format));
 		} break;
 	}
 

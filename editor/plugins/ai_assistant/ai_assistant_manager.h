@@ -2,7 +2,7 @@
 /*  ai_assistant_manager.h                                                */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
+/*                           BLURED ENGINE                              */
 /*                    AI-powered game creation module                     */
 /**************************************************************************/
 
