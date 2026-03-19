@@ -2,7 +2,7 @@
 /*  art_director_dock.h                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
+/*                           BLURED ENGINE                              */
 /*                    AI-powered game creation module                     */
 /**************************************************************************/
 
@@ -74,7 +74,9 @@ class ArtDirectorPanel : public PanelContainer {
 	Timer *gallery_refresh_timer = nullptr;
 	bool images_request_in_progress = false;
 
-	String service_url = "http://localhost:4096";
+	String service_url; // Initialized from BLURED_AI_PORT env var in constructor
+	bool profile_request_in_progress = false;
+	bool models_request_in_progress = false;
 
 	// Thumbnail interaction
 	void _on_thumb_gui_input(const Ref<InputEvent> &p_event, String p_abs_path);

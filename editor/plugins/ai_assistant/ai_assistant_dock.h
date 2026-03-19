@@ -2,7 +2,7 @@
 /*  ai_assistant_dock.h                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
+/*                           BLURED ENGINE                              */
 /*                    AI-powered game creation module                     */
 /**************************************************************************/
 
@@ -132,6 +132,7 @@ private:
 	void _on_wizard_api_key_connect(const String &p_provider_id);
 	void _on_wizard_api_key_submit(const String &p_provider_id);
 	void _on_wizard_api_key_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
+	void _on_wizard_masked_key_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
 	void _on_wizard_local_health_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
 	// Step 2: Image Model selector (populated from connected providers)
 	VBoxContainer *wizard_image_model_container = nullptr;
@@ -332,7 +333,7 @@ private:
 
 	// HTTP connection to OpenCode
 	HTTPRequest *http_request = nullptr;
-	String service_url = "http://localhost:4096";
+	String service_url; // Initialized from BLURED_AI_PORT env var in constructor
 	String session_id;
 	ConnectionStatus connection_status = DISCONNECTED;
 

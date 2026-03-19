@@ -82,6 +82,7 @@ void AIAssistantDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_wizard_api_key_connect", "provider_id"), &AIAssistantDock::_on_wizard_api_key_connect);
 	ClassDB::bind_method(D_METHOD("_on_wizard_api_key_submit", "provider_id"), &AIAssistantDock::_on_wizard_api_key_submit);
 	ClassDB::bind_method(D_METHOD("_on_wizard_api_key_completed", "result", "code", "headers", "body", "provider_id"), &AIAssistantDock::_on_wizard_api_key_completed);
+	ClassDB::bind_method(D_METHOD("_on_wizard_masked_key_completed", "result", "code", "headers", "body", "provider_id"), &AIAssistantDock::_on_wizard_masked_key_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_local_health_completed", "result", "code", "headers", "body", "provider_id"), &AIAssistantDock::_on_wizard_local_health_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_fetch_image_model_completed", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_fetch_image_model_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_image_model_selected", "index"), &AIAssistantDock::_on_wizard_image_model_selected);
@@ -175,6 +176,13 @@ AIAssistantDock::AIAssistantDock() {
 	set_title(TTR("AI"));
 	set_icon_name(SNAME("Node"));
 	set_default_slot(DOCK_SLOT_RIGHT_UL);
+
+	// Read port from BLURED_AI_PORT env var (default 13700)
+	String port = OS::get_singleton()->get_environment("BLURED_AI_PORT");
+	if (port.is_empty()) {
+		port = "13700";
+	}
+	service_url = "http://localhost:" + port;
 
 	// Prevent the dock from requesting excessive minimum height that would
 	// force the editor window to grow beyond the screen.
@@ -1795,9 +1803,9 @@ void AIAssistantDock::_wizard_populate_image_models() {
 	bool replicate_connected = wizard_connected.has("replicate") && wizard_connected["replicate"];
 	if (replicate_connected) {
 		wizard_image_model_selector->add_item("Replicate / nano-banana-2");
-		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "nano-banana-2");
+		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "replicate/nano-banana-2");
 		wizard_image_model_selector->add_item("Replicate / nano-banana-pro");
-		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "nano-banana-pro");
+		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "replicate/nano-banana-pro");
 		has_any = true;
 	}
 
@@ -1939,6 +1947,23 @@ void AIAssistantDock::_on_wizard_skip() {
 
 void AIAssistantDock::_on_wizard_finish() {
 	wizard_dialog->hide();
+
+	// Save all wizard service settings in a single atomic request
+	Dictionary body;
+	if (!wizard_current_image_model.is_empty()) {
+		body["image_model"] = wizard_current_image_model;
+	}
+	if (!wizard_current_rembg_method.is_empty()) {
+		body["removebg_method"] = wizard_current_rembg_method;
+	}
+	if (!body.is_empty()) {
+		String url = service_url + "/ai-assets/wizard-settings";
+		Vector<String> headers = _get_headers_with_directory();
+		HTTPRequest *req = memnew(HTTPRequest);
+		add_child(req);
+		req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
+		req->request(url, headers, HTTPClient::METHOD_POST, JSON::stringify(body));
+	}
 
 	// Show summary in chat
 	RichTextLabel *summary = memnew(RichTextLabel);
@@ -2100,16 +2125,15 @@ void AIAssistantDock::_wizard_rebuild_api_key_rows() {
 		desc->set_custom_minimum_size(Size2(180, 0));
 		row->add_child(desc);
 
-		if (local_rows[i].connected) {
-			Label *status = memnew(Label);
-			status->set_text("Connected");
-			status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-			status->set_custom_minimum_size(Size2(90, 0));
-			row->add_child(status);
-		} else {
+		{
 			Button *connect_btn = memnew(Button);
-			connect_btn->set_text("Connect");
 			connect_btn->set_custom_minimum_size(Size2(90, 0));
+			if (local_rows[i].connected) {
+				connect_btn->set_text("Connected");
+				connect_btn->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
+			} else {
+				connect_btn->set_text("Connect");
+			}
 			connect_btn->connect("pressed", Callable(this, "_on_wizard_api_key_connect").bind(local_rows[i].id));
 			row->add_child(connect_btn);
 		}
@@ -2148,16 +2172,15 @@ void AIAssistantDock::_wizard_rebuild_api_key_rows() {
 		desc->set_custom_minimum_size(Size2(180, 0));
 		row->add_child(desc);
 
-		if (cloud_rows[i].connected) {
-			Label *status = memnew(Label);
-			status->set_text("Connected");
-			status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-			status->set_custom_minimum_size(Size2(90, 0));
-			row->add_child(status);
-		} else {
+		{
 			Button *connect_btn = memnew(Button);
-			connect_btn->set_text("Connect");
 			connect_btn->set_custom_minimum_size(Size2(90, 0));
+			if (cloud_rows[i].connected) {
+				connect_btn->set_text("Connected");
+				connect_btn->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
+			} else {
+				connect_btn->set_text("Connect");
+			}
 			connect_btn->connect("pressed", Callable(this, "_on_wizard_api_key_connect").bind(cloud_rows[i].id));
 			row->add_child(connect_btn);
 		}
@@ -2177,8 +2200,15 @@ void AIAssistantDock::_on_wizard_api_key_connect(const String &p_provider_id) {
 			break;
 		}
 	}
-	if (!item || item->get_child_count() > 1) {
-		return; // Not found or already expanded
+	if (!item) {
+		return;
+	}
+	// Toggle: if already expanded, collapse and return
+	if (item->get_child_count() > 1) {
+		Node *expanded = item->get_child(1);
+		item->remove_child(expanded);
+		expanded->queue_free();
+		return;
 	}
 
 	// Check if this is a local provider (health check instead of API key)
@@ -2228,7 +2258,14 @@ void AIAssistantDock::_on_wizard_api_key_connect(const String &p_provider_id) {
 		key_row->add_child(submit_btn);
 
 		item->add_child(key_row);
-		key_input->grab_focus();
+
+		// If provider is already connected, show dots (sentinel) representing the cached key
+		bool is_connected = wizard_connected.has(p_provider_id) && wizard_connected[p_provider_id];
+		if (is_connected) {
+			key_input->set_text("__cached__");
+		} else {
+			key_input->grab_focus();
+		}
 	}
 }
 
@@ -2314,18 +2351,14 @@ void AIAssistantDock::_on_wizard_api_key_completed(int p_result, int p_code, con
 		// Set connected flag
 		wizard_connected.insert(p_provider_id, true);
 
-		// Replace Connect button with "Connected" label in header row
+		// Update Connect button to show "Connected" state
 		HBoxContainer *header_row = Object::cast_to<HBoxContainer>(item->get_child(0));
 		if (header_row) {
 			int last = header_row->get_child_count() - 1;
 			Button *btn = Object::cast_to<Button>(header_row->get_child(last));
 			if (btn) {
-				btn->queue_free();
-				Label *connected = memnew(Label);
-				connected->set_text("Connected");
-				connected->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-				connected->set_custom_minimum_size(Size2(90, 0));
-				header_row->add_child(connected);
+				btn->set_text("Connected");
+				btn->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
 			}
 		}
 
@@ -2338,6 +2371,10 @@ void AIAssistantDock::_on_wizard_api_key_completed(int p_result, int p_code, con
 		status->set_text("Error (" + itos(p_code) + ")");
 		status->add_theme_color_override("font_color", Color(1, 0, 0));
 	}
+}
+
+void AIAssistantDock::_on_wizard_masked_key_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id) {
+	// No longer used -- kept for ClassDB binding compatibility
 }
 
 void AIAssistantDock::_on_wizard_local_health_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id) {
@@ -2362,7 +2399,7 @@ void AIAssistantDock::_on_wizard_local_health_completed(int p_result, int p_code
 			if (status) {
 				if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
 					status->set_text("Service not running");
-					status->add_theme_color_override("font_color", Color(1, 0, 0));
+					status->add_theme_color_override("font_color", Color(1, 0.5, 0));
 				} else {
 					status->set_text("Connected!");
 					status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
@@ -2377,18 +2414,14 @@ void AIAssistantDock::_on_wizard_local_health_completed(int p_result, int p_code
 
 	wizard_connected.insert(p_provider_id, true);
 
-	// Replace Connect button with "Connected" label in header row
+	// Update Connect button to show "Connected" state
 	HBoxContainer *header_row = Object::cast_to<HBoxContainer>(item->get_child(0));
 	if (header_row) {
 		int last = header_row->get_child_count() - 1;
 		Button *btn = Object::cast_to<Button>(header_row->get_child(last));
 		if (btn) {
-			btn->queue_free();
-			Label *connected = memnew(Label);
-			connected->set_text("Connected");
-			connected->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-			connected->set_custom_minimum_size(Size2(90, 0));
-			header_row->add_child(connected);
+			btn->set_text("Connected");
+			btn->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
 		}
 	}
 }
@@ -2397,57 +2430,20 @@ void AIAssistantDock::_on_wizard_image_model_selected(int p_index) {
 	if (p_index < 0 || p_index >= wizard_image_model_selector->get_item_count()) {
 		return;
 	}
-	String model = wizard_image_model_selector->get_item_metadata(p_index);
-
-	wizard_image_model_status->set_text("Saving...");
-	wizard_image_model_status->add_theme_color_override("font_color", Color(1, 1, 0));
-
-	Dictionary body;
-	body["model"] = model;
-	String url = service_url + "/ai-assets/image-model";
-	Vector<String> headers = _get_headers_with_directory();
-	HTTPRequest *req = memnew(HTTPRequest);
-	add_child(req);
-	req->connect("request_completed", Callable(this, "_on_wizard_image_model_saved"));
-	req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
-	req->request(url, headers, HTTPClient::METHOD_POST, JSON::stringify(body));
+	// Track selection locally; saved on Finish
+	wizard_current_image_model = wizard_image_model_selector->get_item_metadata(p_index);
 }
 
 void AIAssistantDock::_on_wizard_image_model_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
-	if (!wizard_image_model_status) {
-		return;
-	}
-	if (p_result == HTTPRequest::RESULT_SUCCESS && p_code == 200) {
-		wizard_image_model_status->set_text("Saved");
-		wizard_image_model_status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-		int sel = wizard_image_model_selector->get_selected();
-		if (sel >= 0) {
-			wizard_current_image_model = wizard_image_model_selector->get_item_metadata(sel);
-		}
-	} else {
-		wizard_image_model_status->set_text("Failed");
-		wizard_image_model_status->add_theme_color_override("font_color", Color(1, 0, 0));
-	}
+	// Callback for finish-time save
 }
 
 void AIAssistantDock::_on_wizard_rembg_method_selected(int p_index) {
 	if (p_index < 0 || p_index >= wizard_rembg_method_selector->get_item_count()) {
 		return;
 	}
-	String method = wizard_rembg_method_selector->get_item_metadata(p_index);
-
-	wizard_rembg_method_status->set_text("Saving...");
-	wizard_rembg_method_status->add_theme_color_override("font_color", Color(1, 1, 0));
-
-	Dictionary body;
-	body["method"] = method;
-	String url = service_url + "/ai-assets/removebg-method";
-	Vector<String> headers = _get_headers_with_directory();
-	HTTPRequest *req = memnew(HTTPRequest);
-	add_child(req);
-	req->connect("request_completed", Callable(this, "_on_wizard_rembg_method_saved"));
-	req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
-	req->request(url, headers, HTTPClient::METHOD_POST, JSON::stringify(body));
+	// Track selection locally; saved on Finish
+	wizard_current_rembg_method = wizard_rembg_method_selector->get_item_metadata(p_index);
 }
 
 void AIAssistantDock::_on_wizard_rembg_method_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
@@ -3256,7 +3252,7 @@ void AIAssistantDock::_process_local_command(const String &p_prompt) {
 	String lower = p_prompt.to_lower();
 
 	if (lower.contains("help")) {
-		_add_ai_message("**RedBlue AI Help**\n\n**Quick Commands:**\n- run / play - Run the project\n- stop - Stop the project\n- save - Save the current scene\n\n**Full AI Features:**\nClick 'Connect' to connect to the AI service (http://localhost:4096).\n\nMake sure the AI server is running with the RedBlue launcher.");
+		_add_ai_message("**RedBlue AI Help**\n\n**Quick Commands:**\n- run / play - Run the project\n- stop - Stop the project\n- save - Save the current scene\n\n**Full AI Features:**\nClick 'Connect' to connect to the AI service (http://localhost:13700).\n\nMake sure the AI server is running with the RedBlue launcher.");
 	} else if (lower.contains("run") || lower.contains("play")) {
 		EditorInterface::get_singleton()->play_main_scene();
 		_add_ai_message("Running project...");
@@ -5734,10 +5730,10 @@ void AIAssistantDock::_load_session_history() {
 	_update_loading_overlay("Loading chat history...");
 
 	// Use a separate HTTP request for session history to avoid blocking other requests
-	// We'll create a temporary HTTPRequest for this
 	HTTPRequest *history_request = memnew(HTTPRequest);
 	add_child(history_request);
 	history_request->connect("request_completed", Callable(this, "_on_session_history_completed"));
+	history_request->connect("request_completed", callable_mp((Node *)history_request, &Node::queue_free).unbind(4));
 
 	String url = service_url + "/session/" + session_id + "/message?directory=" + _get_project_directory().uri_encode();
 	history_request->request(url, _get_headers_with_directory());
@@ -5746,17 +5742,6 @@ void AIAssistantDock::_load_session_history() {
 void AIAssistantDock::_on_session_history_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
 	// Hide loading overlay — history loading is done (success or failure)
 	_hide_loading_overlay();
-
-	// Clean up the temporary HTTPRequest
-	HTTPRequest *sender = Object::cast_to<HTTPRequest>(get_child(get_child_count() - 1));
-	if (sender && sender != http_request && sender != session_list_http_request &&
-		sender != session_history_list_http &&
-		sender != model_http_request && sender != http_auth_request &&
-		sender != logs_http_request &&
-		sender != stream_http_request && sender != command_http_request &&
-		sender != question_http_request) {
-		sender->queue_free();
-	}
 
 	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
 		_add_system_message("[History] Could not load chat history.");
@@ -6300,6 +6285,7 @@ void AIAssistantDock::_start_oauth_flow() {
 	Vector<String> headers = _get_headers_with_directory();
 	headers.push_back("Accept: application/json");
 	String body = "{\"method\": " + itos(pending_auth_method_index) + "}";
+	http_auth_request->cancel_request();
 	Error err = http_auth_request->request(url, headers, HTTPClient::METHOD_POST, body);
 	if (err != OK) {
 		_add_system_message("Failed to start authentication.");
@@ -6326,6 +6312,7 @@ void AIAssistantDock::_poll_oauth_callback() {
 	Vector<String> headers = _get_headers_with_directory();
 	headers.push_back("Accept: application/json");
 	String body = "{\"method\": " + itos(pending_auth_method_index) + "}";
+	http_auth_request->cancel_request();
 	Error err = http_auth_request->request(url, headers, HTTPClient::METHOD_POST, body);
 	if (err != OK) {
 		print_line("[AIAssistant] Failed to send poll request");
@@ -6350,6 +6337,7 @@ void AIAssistantDock::_on_auth_code_submitted() {
 	headers.push_back("Accept: application/json");
 
 	String body = "{\"method\": " + itos(pending_auth_method_index) + ", \"code\": \"" + code.json_escape() + "\"}";
+	http_auth_request->cancel_request();
 	Error err = http_auth_request->request(url, headers, HTTPClient::METHOD_POST, body);
 	if (err != OK) {
 		_add_system_message("Failed to submit authorization code.");
@@ -7205,6 +7193,7 @@ void AIAssistantDock::_on_session_rename_confirmed() {
 	body["title"] = new_title;
 	String body_str = JSON::stringify(body);
 
+	session_rename_http->cancel_request();
 	session_rename_http->request(url, headers, HTTPClient::METHOD_PATCH, body_str);
 
 	// Optimistically update cached data and UI.

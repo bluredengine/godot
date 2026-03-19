@@ -30,6 +30,10 @@ def version_info_builder(target, source, env):
 #define GODOT_VERSION_WEBSITE "{website}"
 #define GODOT_VERSION_DOCS_BRANCH "{docs_branch}"
 #define GODOT_VERSION_DOCS_URL "https://docs.godotengine.org/en/" GODOT_VERSION_DOCS_BRANCH
+#define BLURED_VERSION_MAJOR {blured_major}
+#define BLURED_VERSION_MINOR {blured_minor}
+#define BLURED_VERSION_PATCH {blured_patch}
+#define BLURED_VERSION_STATUS "{blured_status}"
 """.format(**source[0].read())
         )
 

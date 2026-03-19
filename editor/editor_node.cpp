@@ -376,7 +376,7 @@ void EditorNode::_update_title() {
 		// Display the "modified" mark before anything else so that it can always be seen in the OS task bar.
 		title = vformat("(*) %s", title);
 	}
-	DisplayServer::get_singleton()->window_set_title(title + String(" - ") + GODOT_VERSION_NAME);
+	DisplayServer::get_singleton()->window_set_title(title + String(" - Blured Engine"));
 	if (project_title) {
 		project_title->set_text(title);
 	}
@@ -1611,7 +1611,7 @@ void EditorNode::_scan_external_changes() {
 	}
 
 	if (need_reload) {
-		// Auto-reload without confirmation dialog (Makabaka: AI modifies scenes externally)
+		// Auto-reload without confirmation dialog (Blured: AI modifies scenes externally)
 		callable_mp(this, &EditorNode::_reload_modified_scenes).call_deferred();
 		if (disk_changed_project) {
 			callable_mp(this, &EditorNode::_reload_project_settings).call_deferred();

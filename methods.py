@@ -154,6 +154,10 @@ def get_version_info(module_version_string="", silent=False):
         "module_config": str(version.module_config) + module_version_string,
         "website": str(version.website),
         "docs_branch": str(version.docs),
+        "blured_major": int(version.blured_major),
+        "blured_minor": int(version.blured_minor),
+        "blured_patch": int(version.blured_patch),
+        "blured_status": str(version.blured_status),
     }
 
     # For dev snapshots (alpha, beta, RC, etc.) we do not commit status change to Git,
