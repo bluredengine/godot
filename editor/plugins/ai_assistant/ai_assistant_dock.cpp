@@ -5034,7 +5034,7 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 		}
 
 		if (!EditorRunBar::get_singleton()->is_playing()) {
-			_add_system_message("[Screenshot] No game running — start the game first.");
+			_add_system_message("[Screenshot] No game running -- start the game first.");
 			_post_screenshot_result(screenshot_id, "");
 			return;
 		}
@@ -5043,7 +5043,7 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 				callable_mp_static(&AIAssistantDock::_screenshot_for_tool_static).bind(screenshot_id));
 
 		if (!ok) {
-			_add_system_message("[Screenshot] Could not request screenshot — game may not be embedded.");
+			_add_system_message("[Screenshot] Could not request screenshot -- game may not be embedded.");
 			_post_screenshot_result(screenshot_id, "");
 		}
 	} else if (p_action == "eval") {
@@ -5845,7 +5845,7 @@ void AIAssistantDock::_screenshot_for_tool_static(int64_t p_w, int64_t p_h, cons
 
 void AIAssistantDock::_on_screenshot_pressed() {
 	if (!EditorRunBar::get_singleton()->is_playing()) {
-		_add_system_message("[Screenshot] No game running — press F5 to run the game first.");
+		_add_system_message("[Screenshot] No game running -- press F5 to run the game first.");
 		return;
 	}
 
