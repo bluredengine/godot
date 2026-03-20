@@ -7854,16 +7854,25 @@ void AIAssistantDock::_on_session_rename_completed(int p_result, int p_code, con
 
 void AIAssistantDock::_on_snip_pressed() {
 	// Launch external ScreenCapture tool for snipping.
-	// Search in multiple locations: next to exe, and in repo dist/.
+	// Search in multiple locations for both dev and dist builds.
 	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
-	String tool_path = exe_dir.path_join("tools").path_join("ScreenCapture.exe");
+	String tool_path;
 
-	if (!FileAccess::exists(tool_path)) {
-		// Fallback: check parent dir (for dev builds where exe is in godot/bin/).
-		tool_path = exe_dir.get_base_dir().path_join("dist").path_join("redblue-engine").path_join("tools").path_join("ScreenCapture.exe");
+	// Candidates:
+	// 1. {exe_dir}/tools/ (dev builds: godot/bin/tools/)
+	// 2. {exe_dir}/../tools/ (dist builds: bin/../tools/ = dist/blured-engine/tools/)
+	Vector<String> candidates;
+	candidates.push_back(exe_dir.path_join("tools").path_join("ScreenCapture.exe"));
+	candidates.push_back(exe_dir.get_base_dir().path_join("tools").path_join("ScreenCapture.exe"));
+
+	for (int i = 0; i < candidates.size(); i++) {
+		if (FileAccess::exists(candidates[i])) {
+			tool_path = candidates[i];
+			break;
+		}
 	}
 
-	if (!FileAccess::exists(tool_path)) {
+	if (tool_path.is_empty()) {
 		_add_system_message("[Snip] ScreenCapture.exe not found. Place it at: " + exe_dir.path_join("tools").path_join("ScreenCapture.exe"));
 		return;
 	}
