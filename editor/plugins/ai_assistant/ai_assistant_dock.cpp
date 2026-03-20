@@ -1774,6 +1774,15 @@ void AIAssistantDock::_wizard_populate_image_models() {
 		has_any = true;
 	}
 
+	bool google_connected = wizard_connected.has("google") && wizard_connected["google"];
+	if (google_connected) {
+		wizard_image_model_selector->add_item("Google / nano-banana-2");
+		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "google/nano-banana-2");
+		wizard_image_model_selector->add_item("Google / nano-banana-pro");
+		wizard_image_model_selector->set_item_metadata(wizard_image_model_selector->get_item_count() - 1, "google/nano-banana-pro");
+		has_any = true;
+	}
+
 	// Pre-select based on last known model
 	if (has_any && !wizard_current_image_model.is_empty()) {
 		for (int i = 0; i < wizard_image_model_selector->get_item_count(); i++) {
