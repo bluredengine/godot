@@ -34,11 +34,13 @@
 #include "core/debugger/debugger_marshalls.h"
 #include "core/debugger/engine_debugger.h"
 #include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/io/marshalls.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/math/math_fieldwise.h"
 #include "core/object/script_language.h"
+#include "core/object/worker_thread_pool.h"
 #include "core/os/time.h"
 #include "core/templates/local_vector.h"
 #include "scene/2d/camera_2d.h"
@@ -488,15 +490,16 @@ Error SceneDebugger::_msg_rq_screenshot(const Array &p_args) {
 	ERR_FAIL_COND_V(p_args.is_empty(), ERR_INVALID_DATA);
 
 	int64_t rq_id = (int64_t)p_args[0];
+	bool raw_rgba = (p_args.size() > 1) ? (bool)p_args[1] : false;
 
 	// Defer to next frame so the GPU has finished rendering the current frame.
-	callable_mp_static(&SceneDebugger::_do_screenshot).bind(rq_id).call_deferred();
+	callable_mp_static(&SceneDebugger::_do_screenshot).bind(rq_id, raw_rgba).call_deferred();
 
 	return OK;
 }
 
-// Called via call_deferred — runs on main thread next frame after GPU flush.
-void SceneDebugger::_do_screenshot(int64_t p_rq_id) {
+// Stage 1 (main thread): GPU readback, then offload file I/O to worker thread.
+void SceneDebugger::_do_screenshot(int64_t p_rq_id, bool p_raw_rgba) {
 	Viewport *viewport = SceneTree::get_singleton()->get_root();
 	ERR_FAIL_NULL(viewport);
 	Ref<ViewportTexture> texture = viewport->get_texture();
@@ -505,27 +508,58 @@ void SceneDebugger::_do_screenshot(int64_t p_rq_id) {
 	ERR_FAIL_COND_MSG(img.is_null(), "rq_screenshot: get_image() returned null");
 	ERR_FAIL_COND_MSG(img->is_empty(), "rq_screenshot: image is empty");
 	img->clear_mipmaps();
+	img->convert(Image::FORMAT_RGBA8);
 
-	const String TEMP_DIR = OS::get_singleton()->get_temp_path();
-	uint32_t suffix_i = 0;
-	String path;
-	while (true) {
-		String datetime = Time::get_singleton()->get_datetime_string_from_system().remove_chars("-T:");
-		datetime += itos(Time::get_singleton()->get_ticks_usec());
-		String suffix = datetime + (suffix_i > 0 ? itos(suffix_i) : "");
-		path = TEMP_DIR.path_join("scr-" + suffix + ".png");
-		if (!DirAccess::exists(path)) {
-			break;
+	// Generate unique temp path in a per-process subfolder.
+	const String TEMP_DIR = OS::get_singleton()->get_temp_path().path_join("blured-scr-" + itos(OS::get_singleton()->get_process_id()));
+	{
+		Ref<DirAccess> da = DirAccess::open(OS::get_singleton()->get_temp_path());
+		if (da.is_valid() && !da->dir_exists(TEMP_DIR)) {
+			da->make_dir_recursive(TEMP_DIR);
 		}
-		suffix_i += 1;
 	}
-	img->save_png(path);
+	static uint32_t frame_counter = 0;
+	String ext = p_raw_rgba ? ".rgba" : ".png";
+	String path = TEMP_DIR.path_join("scr-" + itos(frame_counter++) + ext);
 
+	// Offload file write to worker thread so we don't block the game loop.
+	// Ref<Image> is ref-counted and safe to share when the main thread no longer uses it.
+	WorkerThreadPool::get_singleton()->add_task(
+			callable_mp_static(&SceneDebugger::_screenshot_write_worker).bind(img, p_rq_id, path, p_raw_rgba));
+}
+
+// Stage 2 (worker thread): write file (raw RGBA or PNG). No GPU or debugger access here.
+void SceneDebugger::_screenshot_write_worker(const Ref<Image> &p_img, int64_t p_rq_id, const String &p_path, bool p_raw_rgba) {
+	int64_t w = p_img->get_width();
+	int64_t h = p_img->get_height();
+
+	if (p_raw_rgba) {
+		// Raw RGBA with 8-byte header (uint32 width + uint32 height).
+		// No compression -- ~100x faster than PNG for repeated GIF frame captures.
+		Vector<uint8_t> data = p_img->get_data();
+		Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE);
+		if (f.is_null()) {
+			ERR_PRINT("rq_screenshot: cannot write raw file: " + p_path);
+			return;
+		}
+		f->store_32(w);
+		f->store_32(h);
+		f->store_buffer(data.ptr(), data.size());
+	} else {
+		p_img->save_png(p_path);
+	}
+
+	// Return to main thread to send debugger message (not thread-safe).
+	callable_mp_static(&SceneDebugger::_screenshot_send_result).bind(p_rq_id, w, h, p_path).call_deferred();
+}
+
+// Stage 3 (main thread): send result back to editor via debugger protocol.
+void SceneDebugger::_screenshot_send_result(int64_t p_rq_id, int64_t p_width, int64_t p_height, const String &p_path) {
 	Array arr;
 	arr.append(p_rq_id);
-	arr.append(img->get_width());
-	arr.append(img->get_height());
-	arr.append(path);
+	arr.append(p_width);
+	arr.append(p_height);
+	arr.append(p_path);
 	EngineDebugger::get_singleton()->send_message("game_view:get_screenshot", arr);
 }
 

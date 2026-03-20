@@ -91,19 +91,20 @@ Error EditorDebuggerServerTCP::start(const String &p_uri) {
 		ERR_FAIL_COND_V(!bind_host.is_valid_ip_address() && bind_host != "*", ERR_INVALID_PARAMETER);
 	}
 
-	// Try listening on ports
-	const int max_attempts = 5;
-	for (int attempt = 1;; ++attempt) {
+	// Try listening on ports. Use a large range to handle Hyper-V excluded port ranges on Windows.
+	const int start_port = bind_port;
+	const int max_port = MIN(bind_port + 2000, 65535);
+	bool found = false;
+	for (; bind_port <= max_port; bind_port++) {
 		const Error err = server->listen(bind_port, bind_host);
 		if (err == OK) {
+			found = true;
 			break;
 		}
-		if (attempt >= max_attempts) {
-			EditorNode::get_log()->add_message(vformat("Cannot listen on port %d, remote debugging unavailable.", bind_port), EditorLog::MSG_TYPE_ERROR);
-			return err;
-		}
-		int last_port = bind_port++;
-		EditorNode::get_log()->add_message(vformat("Cannot listen on port %d, trying %d instead.", last_port, bind_port), EditorLog::MSG_TYPE_WARNING);
+	}
+	if (!found) {
+		EditorNode::get_log()->add_message(vformat("Cannot listen on ports %d-%d, remote debugging unavailable.", start_port, max_port), EditorLog::MSG_TYPE_ERROR);
+		return ERR_ALREADY_IN_USE;
 	}
 
 	// Endpoint that the client should connect to

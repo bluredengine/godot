@@ -5034,7 +5034,7 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 		}
 
 		if (!EditorRunBar::get_singleton()->is_playing()) {
-			_add_system_message("[Screenshot] No game running — start the game first.");
+			_add_system_message("[Screenshot] No game running -- start the game first.");
 			_post_screenshot_result(screenshot_id, "");
 			return;
 		}
@@ -5043,7 +5043,7 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 				callable_mp_static(&AIAssistantDock::_screenshot_for_tool_static).bind(screenshot_id));
 
 		if (!ok) {
-			_add_system_message("[Screenshot] Could not request screenshot — game may not be embedded.");
+			_add_system_message("[Screenshot] Could not request screenshot -- game may not be embedded.");
 			_post_screenshot_result(screenshot_id, "");
 		}
 	} else if (p_action == "eval") {
@@ -5845,7 +5845,7 @@ void AIAssistantDock::_screenshot_for_tool_static(int64_t p_w, int64_t p_h, cons
 
 void AIAssistantDock::_on_screenshot_pressed() {
 	if (!EditorRunBar::get_singleton()->is_playing()) {
-		_add_system_message("[Screenshot] No game running — press F5 to run the game first.");
+		_add_system_message("[Screenshot] No game running -- press F5 to run the game first.");
 		return;
 	}
 
@@ -5900,19 +5900,14 @@ bool AIAssistantDock::_add_attachment_from_raw_data(const String &p_filename, co
 	img.instantiate();
 	Error err;
 	if (p_mime == "image/gif") {
-		// GIF: use first frame from gif_frames for thumbnail (if available)
-		if (!gif_frames.is_empty()) {
-			Ref<FileAccess> ff = FileAccess::open(gif_frames[0], FileAccess::READ);
-			if (ff.is_valid()) {
-				Vector<uint8_t> png_buf;
-				png_buf.resize(ff->get_length());
-				ff->get_buffer(png_buf.ptrw(), png_buf.size());
-				ff.unref();
-				err = img->load_png_from_buffer(png_buf);
-			}
+		// GIF: use cached first frame for thumbnail (files may be deleted by OpenCode already).
+		if (gif_first_frame_image.is_valid() && !gif_first_frame_image->is_empty()) {
+			img = gif_first_frame_image;
+			gif_first_frame_image.unref();
 		}
-		if (img->is_empty()) {
+		if (img.is_null() || img->is_empty()) {
 			// Create a small placeholder
+			img.instantiate();
 			img->initialize_data(64, 64, false, Image::FORMAT_RGBA8);
 			img->fill(Color(0.3, 0.3, 0.3, 1.0));
 		}
@@ -6064,10 +6059,31 @@ void AIAssistantDock::_toggle_gif_recording() {
 			return;
 		}
 
+		// Cache first frame for thumbnail before posting (OpenCode deletes temp files after encoding).
+		gif_first_frame_image.unref();
+		if (!gif_frames.is_empty()) {
+			Ref<FileAccess> ff = FileAccess::open(gif_frames[0], FileAccess::READ);
+			if (ff.is_valid()) {
+				if (gif_frames[0].ends_with(".rgba")) {
+					uint32_t w = ff->get_32();
+					uint32_t h = ff->get_32();
+					Vector<uint8_t> rgba;
+					rgba.resize(w * h * 4);
+					ff->get_buffer(rgba.ptrw(), rgba.size());
+					gif_first_frame_image = Image::create_from_data(w, h, false, Image::FORMAT_RGBA8, rgba);
+				} else {
+					Vector<uint8_t> png_buf;
+					png_buf.resize(ff->get_length());
+					ff->get_buffer(png_buf.ptrw(), png_buf.size());
+					gif_first_frame_image.instantiate();
+					gif_first_frame_image->load_png_from_buffer(png_buf);
+				}
+			}
+		}
+
 		print_line("[GIF] Posting " + itos(gif_frames.size()) + " frames to " + service_url + "/godot/record-result");
 		_add_system_message("[GIF] Stopped (" + itos(gif_frames.size()) + " frames). Sending...");
 		_post_gif_result(gif_record_id, gif_frames);
-		// Don't clear gif_frames here — _on_gif_post_completed needs them for thumbnail
 	}
 }
 
@@ -6088,9 +6104,9 @@ void AIAssistantDock::_on_gif_frame_timer() {
 		return;
 	}
 
-	// Request a screenshot for this frame
+	// Request a raw RGBA screenshot for this frame (no PNG compression -- much faster).
 	bool ok = EditorRunBar::get_singleton()->request_screenshot(
-			callable_mp_static(&AIAssistantDock::_gif_frame_screenshot_static));
+			callable_mp_static(&AIAssistantDock::_gif_frame_screenshot_static), true);
 	if (!ok) {
 		print_line("[GIF] request_screenshot returned false");
 	}
@@ -7854,21 +7870,36 @@ void AIAssistantDock::_on_session_rename_completed(int p_result, int p_code, con
 
 void AIAssistantDock::_on_snip_pressed() {
 	// Launch external ScreenCapture tool for snipping.
-	// Search in multiple locations: next to exe, and in repo dist/.
+	// Search in multiple locations for both dev and dist builds.
 	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
-	String tool_path = exe_dir.path_join("tools").path_join("ScreenCapture.exe");
+	String tool_path;
 
-	if (!FileAccess::exists(tool_path)) {
-		// Fallback: check parent dir (for dev builds where exe is in godot/bin/).
-		tool_path = exe_dir.get_base_dir().path_join("dist").path_join("redblue-engine").path_join("tools").path_join("ScreenCapture.exe");
+	// Candidates:
+	// 1. {exe_dir}/tools/ (dev builds: godot/bin/tools/)
+	// 2. {exe_dir}/../tools/ (dist builds: bin/../tools/ = dist/blured-engine/tools/)
+	Vector<String> candidates;
+	candidates.push_back(exe_dir.path_join("tools").path_join("ScreenCapture.exe"));
+	candidates.push_back(exe_dir.get_base_dir().path_join("tools").path_join("ScreenCapture.exe"));
+
+	for (int i = 0; i < candidates.size(); i++) {
+		if (FileAccess::exists(candidates[i])) {
+			tool_path = candidates[i];
+			break;
+		}
 	}
 
-	if (!FileAccess::exists(tool_path)) {
+	if (tool_path.is_empty()) {
 		_add_system_message("[Snip] ScreenCapture.exe not found. Place it at: " + exe_dir.path_join("tools").path_join("ScreenCapture.exe"));
 		return;
 	}
 
-	String temp_dir = OS::get_singleton()->get_user_data_dir();
+	String temp_dir = OS::get_singleton()->get_user_data_dir().path_join("tmp");
+	{
+		Ref<DirAccess> da = DirAccess::open(OS::get_singleton()->get_user_data_dir());
+		if (da.is_valid() && !da->dir_exists("tmp")) {
+			da->make_dir("tmp");
+		}
+	}
 	String temp_path = temp_dir.path_join("snip.png");
 
 	List<String> args;
