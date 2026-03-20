@@ -86,10 +86,9 @@ void AIAssistantDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_wizard_local_health_completed", "result", "code", "headers", "body", "provider_id"), &AIAssistantDock::_on_wizard_local_health_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_fetch_image_model_completed", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_fetch_image_model_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_image_model_selected", "index"), &AIAssistantDock::_on_wizard_image_model_selected);
-	ClassDB::bind_method(D_METHOD("_on_wizard_image_model_saved", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_image_model_saved);
 	ClassDB::bind_method(D_METHOD("_on_wizard_fetch_rembg_method_completed", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_fetch_rembg_method_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_rembg_method_selected", "index"), &AIAssistantDock::_on_wizard_rembg_method_selected);
-	ClassDB::bind_method(D_METHOD("_on_wizard_rembg_method_saved", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_rembg_method_saved);
+	ClassDB::bind_method(D_METHOD("_on_wizard_settings_saved", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_settings_saved);
 	ClassDB::bind_method(D_METHOD("_on_settings_pressed"), &AIAssistantDock::_on_settings_pressed);
 	ClassDB::bind_method(D_METHOD("_on_new_instance_pressed"), &AIAssistantDock::_on_new_instance_pressed);
 	ClassDB::bind_method(D_METHOD("_on_prompt_input_gui_input", "event"), &AIAssistantDock::_on_prompt_input_gui_input);
@@ -1548,10 +1547,7 @@ void AIAssistantDock::_on_setup_pressed() {
 			"meshy": {"name": "Meshy", "services": ["3d-generation"], "keyPrefix": "msy_"},
 			"suno": {"name": "Suno", "services": ["music-generation"]},
 			"doubao": {"name": "Doubao", "services": ["chat", "image-generation"]},
-			"local_rmbg": {"name": "RMBG-2.0", "services": ["background-removal"], "local": true, "healthCheck": "/ai-assets/rmbg-health"},
-			"local_atlas_split": {"name": "Atlas Splitter", "services": ["atlas-split"], "local": true, "healthCheck": "/ai-assets/atlas-split-health"},
-			"local_sharp": {"name": "Sharp", "services": ["image-postprocess"], "local": true, "healthCheck": "/ai-assets/sharp-health"},
-			"local_gifenc": {"name": "GIFenc", "services": ["gif-recording"], "local": true, "healthCheck": "/ai-assets/gifenc-health"}
+			"local_rmbg": {"name": "RMBG-2.0", "services": ["background-removal"], "local": true, "healthCheck": "/ai-assets/rmbg-health"}
 		})";
 		Variant parsed = JSON::parse_string(json_str);
 		if (parsed.get_type() == Variant::DICTIONARY) {
@@ -1637,24 +1633,24 @@ void AIAssistantDock::_setup_wizard_ui() {
 	wizard_pages[0]->add_child(wizard_api_key_list);
 	// Rows are populated dynamically by _wizard_rebuild_api_key_rows()
 
-	// === Step 2: Image Generation Model ===
+	// === Step 2: Service Configuration (image model + background removal) ===
 	wizard_pages[1] = memnew(VBoxContainer);
 	wizard_pages[1]->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	wizard_pages[1]->set_visible(false);
 	root->add_child(wizard_pages[1]);
 
-	Label *img_title = memnew(Label);
-	img_title->set_text("Select the image generation model to use for AI-powered asset creation.\nOnly providers connected in Step 1 are shown.");
-	img_title->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	img_title->add_theme_font_size_override("font_size", 12);
-	img_title->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
-	wizard_pages[1]->add_child(img_title);
+	Label *svc_title = memnew(Label);
+	svc_title->set_text("Configure AI services for asset creation.\nOnly providers connected in Step 1 are shown.");
+	svc_title->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	svc_title->add_theme_font_size_override("font_size", 12);
+	svc_title->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
+	wizard_pages[1]->add_child(svc_title);
 
+	// -- Image Generation Model --
 	wizard_image_model_container = memnew(VBoxContainer);
 	wizard_image_model_container->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	wizard_pages[1]->add_child(wizard_image_model_container);
 
-	// Model selector row
 	{
 		HBoxContainer *row = memnew(HBoxContainer);
 		row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
@@ -1666,44 +1662,27 @@ void AIAssistantDock::_setup_wizard_ui() {
 
 		wizard_image_model_selector = memnew(OptionButton);
 		wizard_image_model_selector->set_auto_translate(false);
-		wizard_image_model_selector->set_custom_minimum_size(Size2(220, 0));
+		wizard_image_model_selector->set_custom_minimum_size(Size2(250, 0));
 		wizard_image_model_selector->connect("item_selected", Callable(this, "_on_wizard_image_model_selected"));
 		row->add_child(wizard_image_model_selector);
-
-		wizard_image_model_status = memnew(Label);
-		wizard_image_model_status->set_text("");
-		wizard_image_model_status->set_custom_minimum_size(Size2(90, 0));
-		row->add_child(wizard_image_model_status);
 
 		wizard_image_model_container->add_child(row);
 	}
 
-	// "No provider connected" label (hidden by default)
 	wizard_image_no_provider_label = memnew(Label);
-	wizard_image_no_provider_label->set_text("No image generation provider connected. Go back to Step 1 to connect a provider with image generation support.");
+	wizard_image_no_provider_label->set_text("No image generation provider connected.");
 	wizard_image_no_provider_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	wizard_image_no_provider_label->add_theme_color_override("font_color", Color(1, 0.5, 0));
+	wizard_image_no_provider_label->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
 	wizard_image_no_provider_label->set_visible(false);
 	wizard_pages[1]->add_child(wizard_image_no_provider_label);
 
-	// === Step 3: Background Removal ===
-	wizard_pages[2] = memnew(VBoxContainer);
-	wizard_pages[2]->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-	wizard_pages[2]->set_visible(false);
-	root->add_child(wizard_pages[2]);
+	wizard_pages[1]->add_child(memnew(HSeparator));
 
-	Label *bg_title = memnew(Label);
-	bg_title->set_text("Select the background removal method for sprite processing.\nOnly providers connected in Step 1 are shown.");
-	bg_title->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	bg_title->add_theme_font_size_override("font_size", 12);
-	bg_title->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
-	wizard_pages[2]->add_child(bg_title);
-
+	// -- Background Removal --
 	wizard_rembg_container = memnew(VBoxContainer);
 	wizard_rembg_container->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	wizard_pages[2]->add_child(wizard_rembg_container);
+	wizard_pages[1]->add_child(wizard_rembg_container);
 
-	// Method selector row
 	{
 		HBoxContainer *row = memnew(HBoxContainer);
 		row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
@@ -1715,25 +1694,19 @@ void AIAssistantDock::_setup_wizard_ui() {
 
 		wizard_rembg_method_selector = memnew(OptionButton);
 		wizard_rembg_method_selector->set_auto_translate(false);
-		wizard_rembg_method_selector->set_custom_minimum_size(Size2(220, 0));
+		wizard_rembg_method_selector->set_custom_minimum_size(Size2(250, 0));
 		wizard_rembg_method_selector->connect("item_selected", Callable(this, "_on_wizard_rembg_method_selected"));
 		row->add_child(wizard_rembg_method_selector);
-
-		wizard_rembg_method_status = memnew(Label);
-		wizard_rembg_method_status->set_text("");
-		wizard_rembg_method_status->set_custom_minimum_size(Size2(90, 0));
-		row->add_child(wizard_rembg_method_status);
 
 		wizard_rembg_container->add_child(row);
 	}
 
-	// "No provider connected" label (hidden by default)
 	wizard_rembg_no_provider_label = memnew(Label);
-	wizard_rembg_no_provider_label->set_text("No background removal provider connected. Go back to Step 1 to connect a provider with background removal support.");
+	wizard_rembg_no_provider_label->set_text("No background removal provider connected.");
 	wizard_rembg_no_provider_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	wizard_rembg_no_provider_label->add_theme_color_override("font_color", Color(1, 0.5, 0));
+	wizard_rembg_no_provider_label->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
 	wizard_rembg_no_provider_label->set_visible(false);
-	wizard_pages[2]->add_child(wizard_rembg_no_provider_label);
+	wizard_pages[1]->add_child(wizard_rembg_no_provider_label);
 
 	// === Navigation buttons (outside scroll so always visible) ===
 	outer->add_child(memnew(HSeparator));
@@ -1764,30 +1737,23 @@ void AIAssistantDock::_setup_wizard_ui() {
 void AIAssistantDock::_wizard_show_step(int p_step) {
 	wizard_step = p_step;
 
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 2; i++) {
 		wizard_pages[i]->set_visible(i == p_step);
 	}
 
 	String titles[] = {
-		"Step 1 of 3 - API Keys",
-		"Step 2 of 3 - Image Generation Model",
-		"Step 3 of 3 - Background Removal"
+		"Step 1 of 2 - API Keys",
+		"Step 2 of 2 - Service Configuration"
 	};
 	wizard_step_label->set_text(titles[p_step]);
 
 	wizard_back_button->set_visible(p_step > 0);
+	wizard_next_button->set_text(p_step == 1 ? "Finish" : "Next");
 
-	if (p_step == 2) {
-		wizard_next_button->set_text("Finish");
-	} else {
-		wizard_next_button->set_text("Next");
-	}
-
-	// Populate dynamic selectors and fetch current config when entering Steps 2 and 3
+	// Populate dynamic selectors and fetch current config when entering Step 2
 	if (p_step == 1) {
 		_wizard_populate_image_models();
 		_wizard_fetch_current_image_model();
-	} else if (p_step == 2) {
 		_wizard_populate_rembg_methods();
 		_wizard_fetch_current_rembg_method();
 	}
@@ -1795,7 +1761,6 @@ void AIAssistantDock::_wizard_show_step(int p_step) {
 
 void AIAssistantDock::_wizard_populate_image_models() {
 	wizard_image_model_selector->clear();
-	wizard_image_model_status->set_text("");
 
 	bool has_any = false;
 
@@ -1845,20 +1810,26 @@ void AIAssistantDock::_on_wizard_fetch_image_model_completed(int p_result, int p
 	}
 	Dictionary data = json->get_data();
 	if (data.has("model")) {
-		wizard_current_image_model = data["model"];
-		// Update selector to match
+		String saved_model = data["model"];
+		// Try to select the saved model in the dropdown
+		bool found = false;
 		for (int i = 0; i < wizard_image_model_selector->get_item_count(); i++) {
-			if (wizard_image_model_selector->get_item_metadata(i) == wizard_current_image_model) {
+			if (wizard_image_model_selector->get_item_metadata(i) == saved_model) {
 				wizard_image_model_selector->select(i);
+				wizard_current_image_model = saved_model;
+				found = true;
 				break;
 			}
+		}
+		// If saved value not in dropdown, sync to whatever is currently shown
+		if (!found && wizard_image_model_selector->get_item_count() > 0) {
+			wizard_current_image_model = wizard_image_model_selector->get_item_metadata(wizard_image_model_selector->get_selected());
 		}
 	}
 }
 
 void AIAssistantDock::_wizard_populate_rembg_methods() {
 	wizard_rembg_method_selector->clear();
-	wizard_rembg_method_status->set_text("");
 
 	bool has_any = false;
 
@@ -1866,7 +1837,7 @@ void AIAssistantDock::_wizard_populate_rembg_methods() {
 	bool local_rmbg_connected = wizard_connected.has("local_rmbg") && wizard_connected["local_rmbg"];
 
 	if (replicate_connected) {
-		wizard_rembg_method_selector->add_item("Replicate / bria-ai/rmbg-2.0");
+		wizard_rembg_method_selector->add_item("Replicate / bria/remove-background");
 		wizard_rembg_method_selector->set_item_metadata(wizard_rembg_method_selector->get_item_count() - 1, "replicate");
 		has_any = true;
 	}
@@ -1912,13 +1883,20 @@ void AIAssistantDock::_on_wizard_fetch_rembg_method_completed(int p_result, int 
 	}
 	Dictionary data = json->get_data();
 	if (data.has("method")) {
-		wizard_current_rembg_method = data["method"];
-		// Update selector to match
+		String saved_method = data["method"];
+		// Try to select the saved method in the dropdown
+		bool found = false;
 		for (int i = 0; i < wizard_rembg_method_selector->get_item_count(); i++) {
-			if (wizard_rembg_method_selector->get_item_metadata(i) == wizard_current_rembg_method) {
+			if (wizard_rembg_method_selector->get_item_metadata(i) == saved_method) {
 				wizard_rembg_method_selector->select(i);
+				wizard_current_rembg_method = saved_method;
+				found = true;
 				break;
 			}
+		}
+		// If saved value not in dropdown, sync to whatever is currently shown
+		if (!found && wizard_rembg_method_selector->get_item_count() > 0) {
+			wizard_current_rembg_method = wizard_rembg_method_selector->get_item_metadata(wizard_rembg_method_selector->get_selected());
 		}
 	}
 }
@@ -1930,7 +1908,7 @@ void AIAssistantDock::_on_wizard_back() {
 }
 
 void AIAssistantDock::_on_wizard_next() {
-	if (wizard_step < 2) {
+	if (wizard_step < 1) {
 		_wizard_show_step(wizard_step + 1);
 	} else {
 		_on_wizard_finish();
@@ -1938,7 +1916,7 @@ void AIAssistantDock::_on_wizard_next() {
 }
 
 void AIAssistantDock::_on_wizard_skip() {
-	if (wizard_step < 2) {
+	if (wizard_step < 1) {
 		_wizard_show_step(wizard_step + 1);
 	} else {
 		_on_wizard_finish();
@@ -1948,7 +1926,7 @@ void AIAssistantDock::_on_wizard_skip() {
 void AIAssistantDock::_on_wizard_finish() {
 	wizard_dialog->hide();
 
-	// Save all wizard service settings in a single atomic request
+	// Save all wizard settings in a single atomic request
 	Dictionary body;
 	if (!wizard_current_image_model.is_empty()) {
 		body["image_model"] = wizard_current_image_model;
@@ -1961,6 +1939,7 @@ void AIAssistantDock::_on_wizard_finish() {
 		Vector<String> headers = _get_headers_with_directory();
 		HTTPRequest *req = memnew(HTTPRequest);
 		add_child(req);
+		req->connect("request_completed", Callable(this, "_on_wizard_settings_saved"));
 		req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
 		req->request(url, headers, HTTPClient::METHOD_POST, JSON::stringify(body));
 	}
@@ -1986,14 +1965,6 @@ void AIAssistantDock::_on_wizard_finish() {
 			msg += "[color=gray]* " + name + " - skipped[/color]\n";
 		}
 	}
-	// Local RMBG
-	bool local_rmbg_connected = wizard_connected.has("local_rmbg") && wizard_connected["local_rmbg"];
-	if (local_rmbg_connected) {
-		msg += "[color=green]* Local RMBG-2.0 - connected[/color]\n";
-	} else {
-		msg += "[color=gray]* Local RMBG-2.0 - skipped[/color]\n";
-	}
-
 	// Image model
 	if (!wizard_current_image_model.is_empty()) {
 		msg += "[color=green]* Image Model: " + wizard_current_image_model + "[/color]\n";
@@ -2003,7 +1974,7 @@ void AIAssistantDock::_on_wizard_finish() {
 
 	// Background removal
 	if (!wizard_current_rembg_method.is_empty()) {
-		String method_label = wizard_current_rembg_method == "local" ? "Local RMBG-2.0" : "Replicate / bria-ai/rmbg-2.0";
+		String method_label = wizard_current_rembg_method == "local" ? "Local RMBG-2.0" : "Replicate / bria/remove-background";
 		msg += "[color=green]* Background Removal: " + method_label + "[/color]\n";
 	} else {
 		msg += "[color=gray]* Background Removal - skipped[/color]\n";
@@ -2434,8 +2405,8 @@ void AIAssistantDock::_on_wizard_image_model_selected(int p_index) {
 	wizard_current_image_model = wizard_image_model_selector->get_item_metadata(p_index);
 }
 
-void AIAssistantDock::_on_wizard_image_model_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
-	// Callback for finish-time save
+void AIAssistantDock::_on_wizard_settings_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
+	// Settings saved silently -- no UI feedback needed since wizard is already closed
 }
 
 void AIAssistantDock::_on_wizard_rembg_method_selected(int p_index) {
@@ -2444,23 +2415,6 @@ void AIAssistantDock::_on_wizard_rembg_method_selected(int p_index) {
 	}
 	// Track selection locally; saved on Finish
 	wizard_current_rembg_method = wizard_rembg_method_selector->get_item_metadata(p_index);
-}
-
-void AIAssistantDock::_on_wizard_rembg_method_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
-	if (!wizard_rembg_method_status) {
-		return;
-	}
-	if (p_result == HTTPRequest::RESULT_SUCCESS && p_code == 200) {
-		wizard_rembg_method_status->set_text("Saved");
-		wizard_rembg_method_status->add_theme_color_override("font_color", Color(0.3, 1.0, 0.3));
-		int sel = wizard_rembg_method_selector->get_selected();
-		if (sel >= 0) {
-			wizard_current_rembg_method = wizard_rembg_method_selector->get_item_metadata(sel);
-		}
-	} else {
-		wizard_rembg_method_status->set_text("Failed");
-		wizard_rembg_method_status->add_theme_color_override("font_color", Color(1, 0, 0));
-	}
 }
 
 void AIAssistantDock::_on_settings_pressed() {
@@ -5192,7 +5146,686 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 
 		_post_log_result(log_id, content, line_count);
 		_add_system_message("[Logs] Sent " + itos(line_count) + " log lines to AI.");
+	} else if (p_action == "image_process") {
+		_execute_image_process_command(p_params);
+	} else if (p_action == "atlas_split") {
+		_execute_atlas_split_command(p_params);
 	}
+}
+
+// === Thread-safe HTTP POST helper (for worker threads) ===
+
+bool AIAssistantDock::_http_post_json(const String &p_url, const String &p_json_body, const PackedStringArray &p_headers) {
+	// Parse URL into host, port, path
+	String url = p_url;
+	String host;
+	int port = 80;
+	String path;
+	bool use_tls = false;
+
+	if (url.begins_with("http://")) {
+		url = url.substr(7);
+	} else if (url.begins_with("https://")) {
+		url = url.substr(8);
+		use_tls = true;
+		port = 443;
+	}
+
+	int path_start = url.find("/");
+	if (path_start >= 0) {
+		path = url.substr(path_start);
+		url = url.substr(0, path_start);
+	} else {
+		path = "/";
+	}
+
+	int colon_pos = url.find(":");
+	if (colon_pos >= 0) {
+		host = url.substr(0, colon_pos);
+		port = url.substr(colon_pos + 1).to_int();
+	} else {
+		host = url;
+	}
+
+	// Create HTTPClient and connect
+	Ref<HTTPClient> client = HTTPClient::create();
+
+	Error err = client->connect_to_host(host, port, use_tls ? Ref<TLSOptions>(TLSOptions::client()) : Ref<TLSOptions>());
+	if (err != OK) {
+		print_line("[HTTPPost] connect_to_host failed: " + itos(err));
+		return false;
+	}
+
+	// Poll until connected (with timeout)
+	int connect_attempts = 0;
+	while (client->get_status() == HTTPClient::STATUS_CONNECTING || client->get_status() == HTTPClient::STATUS_RESOLVING) {
+		client->poll();
+		OS::get_singleton()->delay_usec(10000); // 10ms
+		if (++connect_attempts > 500) { // 5 second timeout
+			print_line("[HTTPPost] connection timeout");
+			return false;
+		}
+	}
+
+	if (client->get_status() != HTTPClient::STATUS_CONNECTED) {
+		print_line("[HTTPPost] connection failed, status=" + itos(client->get_status()));
+		return false;
+	}
+
+	// Build headers
+	Vector<String> headers;
+	for (int i = 0; i < p_headers.size(); i++) {
+		headers.push_back(p_headers[i]);
+	}
+
+	// Send request
+	CharString body_utf8 = p_json_body.utf8();
+	err = client->request(HTTPClient::METHOD_POST, path, headers, (const uint8_t *)body_utf8.get_data(), body_utf8.length());
+	if (err != OK) {
+		print_line("[HTTPPost] request failed: " + itos(err));
+		return false;
+	}
+
+	// Poll until response complete
+	int response_attempts = 0;
+	bool done = false;
+	while (!done) {
+		HTTPClient::Status status = client->get_status();
+		switch (status) {
+			case HTTPClient::STATUS_REQUESTING: {
+				client->poll();
+				break;
+			}
+			case HTTPClient::STATUS_BODY: {
+				client->poll();
+				client->read_response_body_chunk(); // Drain body
+				break;
+			}
+			case HTTPClient::STATUS_CONNECTED: {
+				done = true;
+				break;
+			}
+			default: {
+				print_line("[HTTPPost] unexpected status: " + itos(status));
+				return false;
+			}
+		}
+		if (!done) {
+			OS::get_singleton()->delay_usec(1000); // 1ms
+			if (++response_attempts > 30000) { // 30 second timeout
+				print_line("[HTTPPost] response timeout");
+				return false;
+			}
+		}
+	}
+
+	int response_code = client->get_response_code();
+	if (response_code < 200 || response_code >= 300) {
+		print_line("[HTTPPost] error response code=" + itos(response_code));
+	}
+	return response_code >= 200 && response_code < 300;
+}
+
+// === Image Processing (non-blocking via WorkerThreadPool) ===
+
+void AIAssistantDock::_execute_image_process_command(const Dictionary &p_params) {
+	String id = p_params.get("id", "");
+	if (id.is_empty()) {
+		print_line("[ImageProcess] ERROR: empty id");
+		return;
+	}
+
+	String input_b64 = p_params.get("input", "");
+	String input_path = p_params.get("input_path", "");
+	Array ops = p_params.get("ops", Array());
+
+	if (input_b64.is_empty() && input_path.is_empty()) {
+		// Post error via HTTPRequest on main thread (fire-and-forget)
+		Dictionary body;
+		body["id"] = id;
+		body["error"] = "No input provided (need 'input' or 'input_path')";
+		HTTPRequest *req = memnew(HTTPRequest);
+		add_child(req);
+		req->request(service_url + "/godot/image-process-result", _get_headers_with_directory(), HTTPClient::METHOD_POST, JSON::stringify(body));
+		req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
+		return;
+	}
+	if (ops.is_empty()) {
+		Dictionary body;
+		body["id"] = id;
+		body["error"] = "No operations provided";
+		HTTPRequest *req2 = memnew(HTTPRequest);
+		add_child(req2);
+		req2->request(service_url + "/godot/image-process-result", _get_headers_with_directory(), HTTPClient::METHOD_POST, JSON::stringify(body));
+		req2->connect("request_completed", callable_mp((Node *)req2, &Node::queue_free).unbind(4));
+		return;
+	}
+
+	// Capture connection info for the worker thread (which cannot access main-thread state)
+	String url = service_url;
+	PackedStringArray headers = _get_headers_with_directory();
+
+	// Dispatch heavy work to background thread
+	WorkerThreadPool::get_singleton()->add_task(
+			callable_mp_static(&AIAssistantDock::_image_process_worker).bind(id, input_b64, input_path, ops, url, headers),
+			false, "image_process");
+}
+
+void AIAssistantDock::_image_process_worker(const String &p_id, const String &p_input_b64, const String &p_input_path, const Array &p_ops, const String &p_service_url, const PackedStringArray &p_headers) {
+	// --- Runs on background thread ---
+
+	// 1. Load input image
+	Ref<Image> img;
+	img.instantiate();
+	Error load_err = ERR_INVALID_DATA;
+
+	// Read raw bytes from file or base64
+	Vector<uint8_t> raw;
+
+	if (!p_input_path.is_empty()) {
+		// Read file to bytes (thread-safe via FileAccess)
+		Ref<FileAccess> f = FileAccess::open(p_input_path, FileAccess::READ);
+		if (f.is_valid()) {
+			raw.resize(f->get_length());
+			f->get_buffer(raw.ptrw(), raw.size());
+		} else {
+			print_line("[ImageProcess Worker] ERROR: failed to open file: " + p_input_path);
+		}
+	} else if (!p_input_b64.is_empty()) {
+		// Decode base64 to bytes
+		CharString b64_utf8 = p_input_b64.utf8();
+		size_t b64_len = b64_utf8.length();
+		size_t max_decoded_len = b64_len / 4 * 3 + 4;
+		raw.resize(max_decoded_len);
+		size_t decoded_len = 0;
+		Error decode_err = CryptoCore::b64_decode(raw.ptrw(), max_decoded_len, &decoded_len, (const uint8_t *)b64_utf8.get_data(), b64_len);
+		if (decode_err == OK && decoded_len > 0) {
+			raw.resize(decoded_len);
+		} else {
+			raw.clear();
+		}
+	}
+
+	if (raw.size() > 0) {
+		// Try PNG first, then JPEG, then WebP
+		load_err = img->load_png_from_buffer(raw);
+		if (load_err != OK) {
+			load_err = img->load_jpg_from_buffer(raw);
+		}
+		if (load_err != OK) {
+			load_err = img->load_webp_from_buffer(raw);
+		}
+	}
+
+	if (load_err != OK || img->is_empty()) {
+		Dictionary body;
+		body["id"] = p_id;
+		body["error"] = "Failed to load input image";
+		String post_url = p_service_url + "/godot/image-process-result";
+		_http_post_json(post_url, JSON::stringify(body), p_headers);
+		return;
+	}
+
+	// 2. Apply operations sequentially
+	Dictionary result_metadata;
+	String output_format = "png";
+	float output_quality = 0.85;
+	bool output_raw_rgba = false;
+
+	for (int i = 0; i < p_ops.size(); i++) {
+		Dictionary op_dict = p_ops[i];
+		String op = op_dict.get("op", "");
+
+		if (op == "metadata") {
+			result_metadata["width"] = img->get_width();
+			result_metadata["height"] = img->get_height();
+			result_metadata["format"] = Image::get_format_name(img->get_format());
+
+		} else if (op == "resize") {
+			int target_w = op_dict.get("width", 0);
+			int target_h = op_dict.get("height", 0);
+			String fit = op_dict.get("fit", "inside");
+
+			if (target_w > 0 || target_h > 0) {
+				int src_w = img->get_width();
+				int src_h = img->get_height();
+
+				if (fit == "inside") {
+					// Scale to fit within target, maintaining aspect ratio
+					float scale = 1.0f;
+					if (target_w > 0 && target_h > 0) {
+						scale = MIN((float)target_w / src_w, (float)target_h / src_h);
+					} else if (target_w > 0) {
+						scale = (float)target_w / src_w;
+					} else {
+						scale = (float)target_h / src_h;
+					}
+					int new_w = MAX(1, (int)Math::round(src_w * scale));
+					int new_h = MAX(1, (int)Math::round(src_h * scale));
+					img->resize(new_w, new_h, Image::INTERPOLATE_LANCZOS);
+				} else if (fit == "cover") {
+					// Scale to cover target, then crop center
+					if (target_w > 0 && target_h > 0) {
+						float scale = MAX((float)target_w / src_w, (float)target_h / src_h);
+						int new_w = MAX(1, (int)Math::round(src_w * scale));
+						int new_h = MAX(1, (int)Math::round(src_h * scale));
+						img->resize(new_w, new_h, Image::INTERPOLATE_LANCZOS);
+						// Crop center
+						int cx = (new_w - target_w) / 2;
+						int cy = (new_h - target_h) / 2;
+						img->crop_from_point(cx, cy, target_w, target_h);
+					}
+				} else {
+					// "fill" -- stretch to exact dimensions
+					if (target_w > 0 && target_h > 0) {
+						img->resize(target_w, target_h, Image::INTERPOLATE_LANCZOS);
+					}
+				}
+			}
+
+		} else if (op == "trim") {
+			// Remove transparent borders
+			if (img->detect_alpha() != Image::ALPHA_NONE) {
+				Rect2i used = img->get_used_rect();
+				if (used.size.x > 0 && used.size.y > 0) {
+					// Store trim offsets in metadata
+					result_metadata["trimOffsetLeft"] = used.position.x;
+					result_metadata["trimOffsetTop"] = used.position.y;
+					img = img->get_region(used);
+				}
+			}
+
+		} else if (op == "crop") {
+			int x = op_dict.get("x", 0);
+			int y = op_dict.get("y", 0);
+			int w = op_dict.get("width", img->get_width());
+			int h = op_dict.get("height", img->get_height());
+			img = img->get_region(Rect2i(x, y, w, h));
+
+		} else if (op == "pad") {
+			int pad_top = op_dict.get("top", 0);
+			int pad_right = op_dict.get("right", 0);
+			int pad_bottom = op_dict.get("bottom", 0);
+			int pad_left = op_dict.get("left", 0);
+			String color_str = op_dict.get("color", "#00000000");
+
+			int new_w = img->get_width() + pad_left + pad_right;
+			int new_h = img->get_height() + pad_top + pad_bottom;
+
+			Color bg = Color::html(color_str);
+			Ref<Image> padded;
+			padded.instantiate();
+			padded->initialize_data(new_w, new_h, false, img->get_format());
+			padded->fill(bg);
+			padded->blit_rect(img, Rect2i(0, 0, img->get_width(), img->get_height()), Point2i(pad_left, pad_top));
+			img = padded;
+
+		} else if (op == "format") {
+			output_format = op_dict.get("to", "png").operator String();
+			output_quality = op_dict.get("quality", 0.85);
+
+		} else if (op == "decode_rgba") {
+			output_raw_rgba = true;
+			img->convert(Image::FORMAT_RGBA8);
+		}
+	}
+
+	// 3. Encode output
+	String output_b64;
+	if (output_raw_rgba) {
+		Vector<uint8_t> raw_data = img->get_data();
+		output_b64 = CryptoCore::b64_encode_str(raw_data.ptr(), raw_data.size());
+		result_metadata["width"] = img->get_width();
+		result_metadata["height"] = img->get_height();
+		result_metadata["format"] = "raw_rgba";
+	} else {
+		Vector<uint8_t> encoded;
+		if (output_format == "jpeg" || output_format == "jpg") {
+			encoded = img->save_jpg_to_buffer(output_quality);
+			result_metadata["mime"] = "image/jpeg";
+		} else if (output_format == "webp") {
+			encoded = img->save_webp_to_buffer(true, output_quality);
+			result_metadata["mime"] = "image/webp";
+		} else {
+			encoded = img->save_png_to_buffer();
+			result_metadata["mime"] = "image/png";
+		}
+		output_b64 = CryptoCore::b64_encode_str(encoded.ptr(), encoded.size());
+	}
+
+	result_metadata["width"] = img->get_width();
+	result_metadata["height"] = img->get_height();
+
+	// 4. Post result directly from worker thread (HTTPClient is thread-safe)
+	Dictionary body;
+	body["id"] = p_id;
+	body["data"] = output_b64;
+	body["metadata"] = result_metadata;
+	String post_url = p_service_url + "/godot/image-process-result";
+	_http_post_json(post_url, JSON::stringify(body), p_headers);
+}
+
+// === Atlas Split (connected-component labeling) ===
+
+void AIAssistantDock::_execute_atlas_split_command(const Dictionary &p_params) {
+	String id = p_params.get("id", "");
+	if (id.is_empty()) {
+		return;
+	}
+
+	String input_b64 = p_params.get("input", "");
+	String input_path = p_params.get("input_path", "");
+
+	if (input_b64.is_empty() && input_path.is_empty()) {
+		// Post error via HTTPRequest on main thread (fire-and-forget)
+		Dictionary body;
+		body["id"] = id;
+		body["error"] = "No input provided (need 'input' or 'input_path')";
+		String json_body = JSON::stringify(body);
+		HTTPRequest *req = memnew(HTTPRequest);
+		add_child(req);
+		req->request(service_url + "/godot/atlas-split-result", _get_headers_with_directory(), HTTPClient::METHOD_POST, json_body);
+		req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
+		return;
+	}
+
+	int min_area = p_params.get("min_area", 100);
+	int kernel_size = p_params.get("kernel_size", 5);
+	int iterations = p_params.get("iterations", 2);
+	int padding = p_params.get("padding", 2);
+	String bg_mode = p_params.get("bg_mode", "alpha");
+
+	String url = service_url;
+	PackedStringArray headers = _get_headers_with_directory();
+
+	WorkerThreadPool::get_singleton()->add_task(
+			callable_mp_static(&AIAssistantDock::_atlas_split_worker).bind(id, input_b64, input_path, min_area, kernel_size, iterations, padding, bg_mode, url, headers),
+			false, "atlas_split");
+}
+
+void AIAssistantDock::_atlas_split_worker(const String &p_id, const String &p_input_b64, const String &p_input_path, int p_min_area, int p_kernel_size, int p_iterations, int p_padding, const String &p_bg_mode, const String &p_service_url, const PackedStringArray &p_headers) {
+	// --- Runs on background thread ---
+
+	// 1. Load input image
+	Ref<Image> img;
+	img.instantiate();
+	Error load_err = ERR_INVALID_DATA;
+
+	// Read raw bytes from file or base64
+	Vector<uint8_t> raw;
+
+	if (!p_input_path.is_empty()) {
+		Ref<FileAccess> f = FileAccess::open(p_input_path, FileAccess::READ);
+		if (f.is_valid()) {
+			raw.resize(f->get_length());
+			f->get_buffer(raw.ptrw(), raw.size());
+		}
+	} else if (!p_input_b64.is_empty()) {
+		CharString b64_utf8 = p_input_b64.utf8();
+		size_t b64_len = b64_utf8.length();
+		size_t max_decoded_len = b64_len / 4 * 3 + 4;
+		raw.resize(max_decoded_len);
+		size_t decoded_len = 0;
+		Error decode_err = CryptoCore::b64_decode(raw.ptrw(), max_decoded_len, &decoded_len, (const uint8_t *)b64_utf8.get_data(), b64_len);
+		if (decode_err == OK && decoded_len > 0) {
+			raw.resize(decoded_len);
+		} else {
+			raw.clear();
+		}
+	}
+
+	if (raw.size() > 0) {
+		load_err = img->load_png_from_buffer(raw);
+		if (load_err != OK) {
+			load_err = img->load_jpg_from_buffer(raw);
+		}
+		if (load_err != OK) {
+			load_err = img->load_webp_from_buffer(raw);
+		}
+	}
+
+	if (load_err != OK || img->is_empty()) {
+		Dictionary body;
+		body["id"] = p_id;
+		body["error"] = "Failed to load input image";
+		String post_url = p_service_url + "/godot/atlas-split-result";
+		_http_post_json(post_url, JSON::stringify(body), p_headers);
+		return;
+	}
+
+	int width = img->get_width();
+	int height = img->get_height();
+
+	// Ensure RGBA8 format
+	if (img->get_format() != Image::FORMAT_RGBA8) {
+		img->convert(Image::FORMAT_RGBA8);
+	}
+	const uint8_t *pixels = img->get_data().ptr();
+
+	// 2. Create binary mask
+	Vector<uint8_t> mask;
+	mask.resize(width * height);
+	uint8_t *mask_ptr = mask.ptrw();
+
+	if (p_bg_mode == "alpha") {
+		for (int i = 0; i < width * height; i++) {
+			mask_ptr[i] = (pixels[i * 4 + 3] > 10) ? 255 : 0;
+		}
+	} else if (p_bg_mode == "white") {
+		for (int i = 0; i < width * height; i++) {
+			uint8_t r = pixels[i * 4];
+			uint8_t g = pixels[i * 4 + 1];
+			uint8_t b = pixels[i * 4 + 2];
+			uint8_t gray = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+			mask_ptr[i] = (gray < 240) ? 255 : 0;
+		}
+	} else {
+		// black background
+		for (int i = 0; i < width * height; i++) {
+			uint8_t r = pixels[i * 4];
+			uint8_t g = pixels[i * 4 + 1];
+			uint8_t b = pixels[i * 4 + 2];
+			uint8_t gray = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+			mask_ptr[i] = (gray > 15) ? 255 : 0;
+		}
+	}
+
+	// 3. Morphological dilation (box kernel)
+	if (p_iterations > 0 && p_kernel_size > 1) {
+		int half = p_kernel_size / 2;
+		Vector<uint8_t> dilated;
+		dilated.resize(width * height);
+
+		for (int iter = 0; iter < p_iterations; iter++) {
+			const uint8_t *src = (iter == 0) ? mask.ptr() : dilated.ptr();
+			uint8_t *dst = (iter == 0) ? dilated.ptrw() : mask.ptrw();
+
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					uint8_t val = 0;
+					for (int ky = -half; ky <= half && val == 0; ky++) {
+						int sy = y + ky;
+						if (sy < 0 || sy >= height) continue;
+						for (int kx = -half; kx <= half && val == 0; kx++) {
+							int sx = x + kx;
+							if (sx < 0 || sx >= width) continue;
+							if (src[sy * width + sx]) {
+								val = 255;
+							}
+						}
+					}
+					dst[y * width + x] = val;
+				}
+			}
+
+			// If odd iteration, result is in mask; if even, in dilated.
+			// We want final result in mask_ptr.
+		}
+
+		// After iterations, result alternates between mask and dilated.
+		// Ensure final result is in mask.
+		if (p_iterations % 2 == 1) {
+			// Result is in dilated
+			memcpy(mask.ptrw(), dilated.ptr(), width * height);
+		}
+	}
+
+	// 4. Two-pass connected-component labeling with union-find
+	Vector<int> labels;
+	labels.resize(width * height);
+	int *label_ptr = labels.ptrw();
+	memset(label_ptr, 0, width * height * sizeof(int));
+
+	// Union-find parent array
+	Vector<int> parent;
+	parent.resize(1); // label 0 = background
+	parent.ptrw()[0] = 0;
+	int next_label = 1;
+
+	// Find root with path compression
+	auto find_root = [&](int x) -> int {
+		while (parent[x] != x) {
+			parent.ptrw()[x] = parent[parent[x]];
+			x = parent[x];
+		}
+		return x;
+	};
+
+	auto union_labels = [&](int a, int b) {
+		int ra = find_root(a);
+		int rb = find_root(b);
+		if (ra != rb) {
+			parent.ptrw()[MAX(ra, rb)] = MIN(ra, rb);
+		}
+	};
+
+	// First pass
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			if (mask[y * width + x] == 0) continue;
+
+			int above = (y > 0) ? label_ptr[(y - 1) * width + x] : 0;
+			int left = (x > 0) ? label_ptr[y * width + (x - 1)] : 0;
+
+			if (above == 0 && left == 0) {
+				// New label
+				parent.push_back(next_label);
+				label_ptr[y * width + x] = next_label;
+				next_label++;
+			} else if (above != 0 && left == 0) {
+				label_ptr[y * width + x] = above;
+			} else if (above == 0 && left != 0) {
+				label_ptr[y * width + x] = left;
+			} else {
+				// Both neighbors labeled — take the smaller, union them
+				label_ptr[y * width + x] = MIN(above, left);
+				if (above != left) {
+					union_labels(above, left);
+				}
+			}
+		}
+	}
+
+	// Second pass: flatten labels and compute bounding boxes
+	HashMap<int, Rect2i> bboxes;
+	HashMap<int, int> areas;
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int lbl = label_ptr[y * width + x];
+			if (lbl == 0) continue;
+			int root = find_root(lbl);
+			label_ptr[y * width + x] = root;
+
+			if (!bboxes.has(root)) {
+				bboxes[root] = Rect2i(x, y, 1, 1);
+				areas[root] = 1;
+			} else {
+				Rect2i &bb = bboxes[root];
+				int x0 = MIN(bb.position.x, x);
+				int y0 = MIN(bb.position.y, y);
+				int x1 = MAX(bb.position.x + bb.size.x, x + 1);
+				int y1 = MAX(bb.position.y + bb.size.y, y + 1);
+				bb = Rect2i(x0, y0, x1 - x0, y1 - y0);
+				areas[root]++;
+			}
+		}
+	}
+
+	// 5. Collect regions, filter by min area, sort by position
+	struct RegionInfo {
+		Rect2i rect;
+		int area;
+	};
+	Vector<RegionInfo> regions;
+
+	for (const KeyValue<int, Rect2i> &kv : bboxes) {
+		int a = areas[kv.key];
+		if (a < p_min_area) continue;
+		regions.push_back({ kv.value, a });
+	}
+
+	// Sort top-left to bottom-right (row-aware)
+	if (regions.size() > 1) {
+		// Compute median height for row tolerance
+		Vector<int> heights;
+		for (const RegionInfo &r : regions) {
+			heights.push_back(r.rect.size.y);
+		}
+		heights.sort();
+		int median_h = heights[heights.size() / 2];
+		int row_tol = (int)(median_h * 0.3);
+
+		// Bubble sort (simple, small N)
+		for (int i = 0; i < regions.size(); i++) {
+			for (int j = i + 1; j < regions.size(); j++) {
+				bool swap = false;
+				if (Math::abs(regions[i].rect.position.y - regions[j].rect.position.y) <= row_tol) {
+					swap = regions[i].rect.position.x > regions[j].rect.position.x;
+				} else {
+					swap = regions[i].rect.position.y > regions[j].rect.position.y;
+				}
+				if (swap) {
+					SWAP(regions.write[i], regions.write[j]);
+				}
+			}
+		}
+	}
+
+	// 6. Build result array with cropped PNG buffers
+	Array result_regions;
+	for (int i = 0; i < regions.size(); i++) {
+		const RegionInfo &ri = regions[i];
+
+		// Apply padding clamped to image bounds
+		int px = MAX(0, ri.rect.position.x - p_padding);
+		int py = MAX(0, ri.rect.position.y - p_padding);
+		int pw = MIN(width - px, ri.rect.size.x + p_padding * 2);
+		int ph = MIN(height - py, ri.rect.size.y + p_padding * 2);
+
+		// Crop region
+		Ref<Image> cropped = img->get_region(Rect2i(px, py, pw, ph));
+		Vector<uint8_t> png_data = cropped->save_png_to_buffer();
+		String cropped_b64 = CryptoCore::b64_encode_str(png_data.ptr(), png_data.size());
+
+		Dictionary region;
+		region["index"] = i;
+		Dictionary rect;
+		rect["x"] = px;
+		rect["y"] = py;
+		rect["width"] = pw;
+		rect["height"] = ph;
+		region["rect"] = rect;
+		region["area"] = ri.area;
+		region["data"] = cropped_b64;
+		result_regions.push_back(region);
+	}
+
+	Dictionary body;
+	body["id"] = p_id;
+	body["regions"] = result_regions;
+	String post_url = p_service_url + "/godot/atlas-split-result";
+	_http_post_json(post_url, JSON::stringify(body), p_headers);
 }
 
 // === Screenshot Capture ===

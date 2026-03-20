@@ -33,6 +33,7 @@
 #include "scene/main/timer.h"
 
 #include "core/crypto/crypto_core.h"
+#include "core/io/http_client.h"
 #include "core/io/json.h"
 #include "scene/resources/image_texture.h"
 
@@ -112,9 +113,9 @@ private:
 	Button *setup_button = nullptr;
 	ColorRect *connection_indicator = nullptr;
 
-	// Setup wizard (3-step guided configuration)
+	// Setup wizard (2-step guided configuration)
 	AcceptDialog *wizard_dialog = nullptr;
-	VBoxContainer *wizard_pages[3] = {};
+	VBoxContainer *wizard_pages[2] = {};
 	int wizard_step = 0;
 	Label *wizard_step_label = nullptr;
 	Button *wizard_back_button = nullptr;
@@ -134,34 +135,30 @@ private:
 	void _on_wizard_api_key_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
 	void _on_wizard_masked_key_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
 	void _on_wizard_local_health_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body, const String &p_provider_id);
-	// Step 2: Image Model selector (populated from connected providers)
+	// Step 2: Service Configuration (image model + background removal on same page)
 	VBoxContainer *wizard_image_model_container = nullptr;
 	OptionButton *wizard_image_model_selector = nullptr;
-	Label *wizard_image_model_status = nullptr;
 	Label *wizard_image_no_provider_label = nullptr;
 	String wizard_current_image_model; // Last saved/fetched model ID
 	void _wizard_populate_image_models();
 	void _wizard_fetch_current_image_model();
 	void _on_wizard_fetch_image_model_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _on_wizard_image_model_selected(int p_index);
-	void _on_wizard_image_model_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
-	// Step 3: Background Removal selector (populated from connected providers)
 	VBoxContainer *wizard_rembg_container = nullptr;
 	OptionButton *wizard_rembg_method_selector = nullptr;
-	Label *wizard_rembg_method_status = nullptr;
 	Label *wizard_rembg_no_provider_label = nullptr;
 	String wizard_current_rembg_method; // Last saved/fetched method
 	void _wizard_populate_rembg_methods();
 	void _wizard_fetch_current_rembg_method();
 	void _on_wizard_fetch_rembg_method_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _on_wizard_rembg_method_selected(int p_index);
-	void _on_wizard_rembg_method_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _setup_wizard_ui();
 	void _wizard_show_step(int p_step);
 	void _on_wizard_back();
 	void _on_wizard_next();
 	void _on_wizard_skip();
 	void _on_wizard_finish();
+	void _on_wizard_settings_saved(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 
 	// Settings dialog
 	AcceptDialog *settings_dialog = nullptr;
@@ -533,6 +530,17 @@ private:
 	// Static callbacks — bypass ObjectDB checks, dispatch to singleton
 	static void _screenshot_for_button_static(int64_t p_w, int64_t p_h, const String &p_path, const Rect2i &p_rect);
 	static void _screenshot_for_tool_static(int64_t p_w, int64_t p_h, const String &p_path, const Rect2i &p_rect, const String &p_id);
+
+	// Image processing (runs on WorkerThreadPool to avoid blocking editor)
+	void _execute_image_process_command(const Dictionary &p_params);
+	static void _image_process_worker(const String &p_id, const String &p_input_b64, const String &p_input_path, const Array &p_ops, const String &p_service_url, const PackedStringArray &p_headers);
+
+	// Thread-safe HTTP POST helper (used by worker threads to post results back)
+	static bool _http_post_json(const String &p_url, const String &p_json_body, const PackedStringArray &p_headers);
+
+	// Atlas split (connected-component labeling, runs on WorkerThreadPool)
+	void _execute_atlas_split_command(const Dictionary &p_params);
+	static void _atlas_split_worker(const String &p_id, const String &p_input_b64, const String &p_input_path, int p_min_area, int p_kernel_size, int p_iterations, int p_padding, const String &p_bg_mode, const String &p_service_url, const PackedStringArray &p_headers);
 
 	// Game lifecycle
 	void _on_game_stopped();
