@@ -118,7 +118,9 @@ private:
 	static Error _msg_runtime_node_select_set_avoid_locked(const Array &p_args);
 	static Error _msg_runtime_node_select_set_prefer_group(const Array &p_args);
 	static Error _msg_rq_screenshot(const Array &p_args);
-	static void _do_screenshot(int64_t p_rq_id);
+	static void _do_screenshot(int64_t p_rq_id, bool p_raw_rgba);
+	static void _screenshot_write_worker(const Ref<Image> &p_img, int64_t p_rq_id, const String &p_path, bool p_raw_rgba);
+	static void _screenshot_send_result(int64_t p_rq_id, int64_t p_width, int64_t p_height, const String &p_path);
 
 	static Error _msg_runtime_node_select_reset_camera_2d(const Array &p_args);
 	static Error _msg_transform_camera_2d(const Array &p_args);

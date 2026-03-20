@@ -5900,19 +5900,14 @@ bool AIAssistantDock::_add_attachment_from_raw_data(const String &p_filename, co
 	img.instantiate();
 	Error err;
 	if (p_mime == "image/gif") {
-		// GIF: use first frame from gif_frames for thumbnail (if available)
-		if (!gif_frames.is_empty()) {
-			Ref<FileAccess> ff = FileAccess::open(gif_frames[0], FileAccess::READ);
-			if (ff.is_valid()) {
-				Vector<uint8_t> png_buf;
-				png_buf.resize(ff->get_length());
-				ff->get_buffer(png_buf.ptrw(), png_buf.size());
-				ff.unref();
-				err = img->load_png_from_buffer(png_buf);
-			}
+		// GIF: use cached first frame for thumbnail (files may be deleted by OpenCode already).
+		if (gif_first_frame_image.is_valid() && !gif_first_frame_image->is_empty()) {
+			img = gif_first_frame_image;
+			gif_first_frame_image.unref();
 		}
-		if (img->is_empty()) {
+		if (img.is_null() || img->is_empty()) {
 			// Create a small placeholder
+			img.instantiate();
 			img->initialize_data(64, 64, false, Image::FORMAT_RGBA8);
 			img->fill(Color(0.3, 0.3, 0.3, 1.0));
 		}
@@ -6064,10 +6059,31 @@ void AIAssistantDock::_toggle_gif_recording() {
 			return;
 		}
 
+		// Cache first frame for thumbnail before posting (OpenCode deletes temp files after encoding).
+		gif_first_frame_image.unref();
+		if (!gif_frames.is_empty()) {
+			Ref<FileAccess> ff = FileAccess::open(gif_frames[0], FileAccess::READ);
+			if (ff.is_valid()) {
+				if (gif_frames[0].ends_with(".rgba")) {
+					uint32_t w = ff->get_32();
+					uint32_t h = ff->get_32();
+					Vector<uint8_t> rgba;
+					rgba.resize(w * h * 4);
+					ff->get_buffer(rgba.ptrw(), rgba.size());
+					gif_first_frame_image = Image::create_from_data(w, h, false, Image::FORMAT_RGBA8, rgba);
+				} else {
+					Vector<uint8_t> png_buf;
+					png_buf.resize(ff->get_length());
+					ff->get_buffer(png_buf.ptrw(), png_buf.size());
+					gif_first_frame_image.instantiate();
+					gif_first_frame_image->load_png_from_buffer(png_buf);
+				}
+			}
+		}
+
 		print_line("[GIF] Posting " + itos(gif_frames.size()) + " frames to " + service_url + "/godot/record-result");
 		_add_system_message("[GIF] Stopped (" + itos(gif_frames.size()) + " frames). Sending...");
 		_post_gif_result(gif_record_id, gif_frames);
-		// Don't clear gif_frames here — _on_gif_post_completed needs them for thumbnail
 	}
 }
 
@@ -6088,9 +6104,9 @@ void AIAssistantDock::_on_gif_frame_timer() {
 		return;
 	}
 
-	// Request a screenshot for this frame
+	// Request a raw RGBA screenshot for this frame (no PNG compression -- much faster).
 	bool ok = EditorRunBar::get_singleton()->request_screenshot(
-			callable_mp_static(&AIAssistantDock::_gif_frame_screenshot_static));
+			callable_mp_static(&AIAssistantDock::_gif_frame_screenshot_static), true);
 	if (!ok) {
 		print_line("[GIF] request_screenshot returned false");
 	}
@@ -7877,7 +7893,13 @@ void AIAssistantDock::_on_snip_pressed() {
 		return;
 	}
 
-	String temp_dir = OS::get_singleton()->get_user_data_dir();
+	String temp_dir = OS::get_singleton()->get_user_data_dir().path_join("tmp");
+	{
+		Ref<DirAccess> da = DirAccess::open(OS::get_singleton()->get_user_data_dir());
+		if (da.is_valid() && !da->dir_exists("tmp")) {
+			da->make_dir("tmp");
+		}
+	}
 	String temp_path = temp_dir.path_join("snip.png");
 
 	List<String> args;

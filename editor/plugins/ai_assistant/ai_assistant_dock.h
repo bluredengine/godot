@@ -503,7 +503,8 @@ private:
 	Button *gif_record_button = nullptr;
 	bool gif_recording = false;
 	bool gif_record_from_tool = false; // true when triggered by godot_record tool (don't attach to input)
-	Vector<String> gif_frames; // base64 PNG frames
+	Vector<String> gif_frames; // temp file paths for captured frames
+	Ref<Image> gif_first_frame_image; // cached first frame for thumbnail
 	Timer *gif_frame_timer = nullptr;
 	String gif_record_id;
 	int gif_record_fps = 10;

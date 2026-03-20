@@ -709,6 +709,6 @@ EditorRunBar::EditorRunBar() {
 	write_movie_button->set_flat(false);
 }
 
-bool EditorRunBar::request_screenshot(const Callable &p_callback) {
-	return editor_run.request_screenshot(p_callback);
+bool EditorRunBar::request_screenshot(const Callable &p_callback, bool p_raw_rgba) {
+	return editor_run.request_screenshot(p_callback, p_raw_rgba);
 }
