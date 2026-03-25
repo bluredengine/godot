@@ -152,6 +152,14 @@ private:
 	void _wizard_fetch_current_rembg_method();
 	void _on_wizard_fetch_rembg_method_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _on_wizard_rembg_method_selected(int p_index);
+	VBoxContainer *wizard_vision_model_container = nullptr;
+	OptionButton *wizard_vision_model_selector = nullptr;
+	Label *wizard_vision_no_provider_label = nullptr;
+	String wizard_current_vision_model; // Last saved/fetched vision model
+	void _wizard_populate_vision_models();
+	void _wizard_fetch_current_vision_model();
+	void _on_wizard_fetch_vision_model_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
+	void _on_wizard_vision_model_selected(int p_index);
 	void _setup_wizard_ui();
 	void _wizard_show_step(int p_step);
 	void _on_wizard_back();
@@ -265,6 +273,7 @@ private:
 	bool stream_request_in_progress = false;
 	int stream_empty_poll_count = 0; // Count consecutive empty polls for stale session detection
 	String ignore_assistant_message_id; // Skip this message ID during polling (set after abort/stop)
+	bool waiting_for_new_assistant = false; // When true, skip all already-completed assistant messages
 	String compaction_summary_message_id; // The compaction summary message ID (to skip on completion)
 	String compaction_summary_text; // Full summary text for detail popup
 

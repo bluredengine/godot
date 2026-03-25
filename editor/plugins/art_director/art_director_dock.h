@@ -14,7 +14,6 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
 #include "scene/gui/label.h"
-#include "scene/gui/option_button.h"
 #include "scene/gui/panel_container.h"
 #include "scene/gui/rich_text_label.h"
 #include "scene/gui/scroll_container.h"
@@ -36,11 +35,9 @@ class ArtDirectorPanel : public PanelContainer {
 		String category; // "exploration" or "cornerstone"
 		String label;    // short display name (from metadata, cornerstone only)
 		String tooltip;  // full subject description for hover
+		int style_num = 0; // global style number (for exploration images)
 		Ref<ImageTexture> texture;
 	};
-
-	// ── Model selection (top) ────────────────────────────────────────────
-	OptionButton *model_picker = nullptr;
 
 	// ── ① Style Explorations ────────────────────────────────────────────
 	HBoxContainer *exploration_gallery = nullptr;
@@ -70,13 +67,11 @@ class ArtDirectorPanel : public PanelContainer {
 	// ── HTTP infrastructure ──────────────────────────────────────────────
 	HTTPRequest *profile_http_request = nullptr;
 	HTTPRequest *images_http_request = nullptr;
-	HTTPRequest *models_http_request = nullptr;
 	Timer *gallery_refresh_timer = nullptr;
 	bool images_request_in_progress = false;
 
 	String service_url; // Initialized from BLURED_AI_PORT env var in constructor
 	bool profile_request_in_progress = false;
-	bool models_request_in_progress = false;
 
 	// Thumbnail interaction
 	void _on_thumb_gui_input(const Ref<InputEvent> &p_event, String p_abs_path);
@@ -89,14 +84,9 @@ class ArtDirectorPanel : public PanelContainer {
 	void _rebuild_gallery(HBoxContainer *p_gallery, const Vector<ThumbInfo> &p_thumbs, const String &p_category);
 	void _rebuild_exploration_gallery();
 
-	// Internal helpers (continued)
-	void _refresh_models();
-	void _populate_model_picker(OptionButton *p_picker, const String &p_default_id);
-
 	// HTTP callbacks
 	void _on_profile_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _on_images_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
-	void _on_models_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 
 	// UI callbacks
 	void _on_open_image_pressed(String p_abs_path);
@@ -115,8 +105,6 @@ protected:
 
 public:
 	static const int THUMB_SIZE = 120; // Larger since we have the full main screen
-
-	String get_exploration_model() const;
 
 	ArtDirectorPanel();
 	~ArtDirectorPanel() = default;
