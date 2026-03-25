@@ -660,11 +660,6 @@ void AIAssetInfoControl::_on_use_version_pressed() {
 		return;
 	}
 
-	// Re-apply post-processing settings (transparent BG, crop, resize)
-	if (AIAssetGenerationManager::get_singleton()) {
-		AIAssetGenerationManager::get_singleton()->post_process_asset(asset_path);
-	}
-
 	EditorFileSystem::get_singleton()->scan_changes();
 	set_asset_path(asset_path);
 }

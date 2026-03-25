@@ -618,19 +618,19 @@ void EditorNode::_sync_ai_provider_settings() {
 		providers["meshy"] = meshy;
 	}
 
-	// Doubao
-	if (EDITOR_GET("ai/providers/doubao/enabled")) {
-		Dictionary doubao;
-		String api_key = EDITOR_GET("ai/providers/doubao/api_key");
+	// Volcengine
+	if (EDITOR_GET("ai/providers/volcengine/enabled")) {
+		Dictionary volcengine;
+		String api_key = EDITOR_GET("ai/providers/volcengine/api_key");
 		if (!api_key.is_empty()) {
-			doubao["api_key"] = api_key;
+			volcengine["api_key"] = api_key;
 		}
-		String api_url = EDITOR_GET("ai/providers/doubao/api_url");
+		String api_url = EDITOR_GET("ai/providers/volcengine/api_url");
 		if (!api_url.is_empty()) {
-			doubao["api_url"] = api_url;
+			volcengine["api_url"] = api_url;
 		}
-		doubao["enabled"] = true;
-		providers["doubao"] = doubao;
+		volcengine["enabled"] = true;
+		providers["volcengine"] = volcengine;
 	}
 
 	// Suno

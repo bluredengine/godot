@@ -38,7 +38,6 @@ ArtDirectorPanel::ArtDirectorPanel() {
 void ArtDirectorPanel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_profile_completed"), &ArtDirectorPanel::_on_profile_completed);
 	ClassDB::bind_method(D_METHOD("_on_images_completed"), &ArtDirectorPanel::_on_images_completed);
-	ClassDB::bind_method(D_METHOD("_on_models_completed"), &ArtDirectorPanel::_on_models_completed);
 	ClassDB::bind_method(D_METHOD("_on_gallery_refresh_timeout"), &ArtDirectorPanel::_on_gallery_refresh_timeout);
 	ClassDB::bind_method(D_METHOD("_on_open_image_pressed", "abs_path"), &ArtDirectorPanel::_on_open_image_pressed);
 	ClassDB::bind_method(D_METHOD("_on_exploration_refresh_pressed"), &ArtDirectorPanel::_on_exploration_refresh_pressed);
@@ -49,7 +48,6 @@ void ArtDirectorPanel::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		_refresh_profile();
 		_refresh_images();
-		_refresh_models();
 		gallery_refresh_timer->start();
 	}
 }
@@ -75,21 +73,6 @@ void ArtDirectorPanel::_setup_ui() {
 	VBoxContainer *vbox = memnew(VBoxContainer);
 	vbox->set_h_size_flags(SIZE_EXPAND_FILL);
 	scroll->add_child(vbox);
-
-	// ── Model picker (top, global) ──────────────────────────────────────
-	HBoxContainer *model_row = memnew(HBoxContainer);
-	vbox->add_child(model_row);
-
-	Label *model_label = memnew(Label);
-	model_label->set_text(TTR("Model:"));
-	model_row->add_child(model_label);
-
-	model_picker = memnew(OptionButton);
-	model_picker->set_h_size_flags(SIZE_EXPAND_FILL);
-	model_picker->add_item(TTR("Loading..."), 0);
-	model_row->add_child(model_picker);
-
-	vbox->add_child(memnew(HSeparator));
 
 	// ── ① Style Explorations ────────────────────────────────────────────
 	HBoxContainer *exp_header = memnew(HBoxContainer);
@@ -202,10 +185,6 @@ void ArtDirectorPanel::_setup_ui() {
 	add_child(images_http_request);
 	images_http_request->connect("request_completed", callable_mp(this, &ArtDirectorPanel::_on_images_completed));
 
-	models_http_request = memnew(HTTPRequest);
-	add_child(models_http_request);
-	models_http_request->connect("request_completed", callable_mp(this, &ArtDirectorPanel::_on_models_completed));
-
 	gallery_refresh_timer = memnew(Timer);
 	gallery_refresh_timer->set_wait_time(5.0);
 	gallery_refresh_timer->connect("timeout", callable_mp(this, &ArtDirectorPanel::_on_gallery_refresh_timeout));
@@ -250,39 +229,6 @@ void ArtDirectorPanel::_refresh_images() {
 	images_http_request->request(url, headers);
 }
 
-void ArtDirectorPanel::_refresh_models() {
-	if (models_request_in_progress) {
-		return;
-	}
-	models_request_in_progress = true;
-	String url = service_url + "/godot/art-director/models";
-	PackedStringArray headers;
-	models_http_request->request(url, headers);
-}
-
-void ArtDirectorPanel::_populate_model_picker(OptionButton *p_picker, const String &p_default_id) {
-	String current = p_picker->get_item_count() > 0 ? p_picker->get_item_text(p_picker->get_selected()) : "";
-
-	if (current.is_empty() || current == TTR("Loading...")) {
-		for (int i = 0; i < p_picker->get_item_count(); i++) {
-			if (p_picker->get_item_metadata(i) == p_default_id) {
-				p_picker->select(i);
-				return;
-			}
-		}
-		if (p_picker->get_item_count() > 0) {
-			p_picker->select(0);
-		}
-	}
-}
-
-String ArtDirectorPanel::get_exploration_model() const {
-	if (!model_picker || model_picker->get_item_count() == 0) {
-		return "flux-schnell";
-	}
-	Variant meta = model_picker->get_item_metadata(model_picker->get_selected());
-	return meta.get_type() == Variant::STRING ? String(meta) : "flux-schnell";
-}
 
 void ArtDirectorPanel::_load_thumbnail(const String &p_abs_path, ThumbInfo &r_info) {
 	Ref<Image> img = Image::load_from_file(p_abs_path);
@@ -345,9 +291,9 @@ void ArtDirectorPanel::_rebuild_gallery(HBoxContainer *p_gallery, const Vector<T
 		thumb_rect->connect("gui_input", callable_mp(this, &ArtDirectorPanel::_on_thumb_gui_input).bind(abs_path));
 		item_vbox->add_child(thumb_rect);
 
-		// Number label under each thumb
+		// Number label under each thumb (use global style_num if available)
 		Label *num_lbl = memnew(Label);
-		num_lbl->set_text(String::num_int64(i + 1));
+		num_lbl->set_text(info.style_num > 0 ? String::num_int64(info.style_num) : String::num_int64(i + 1));
 		num_lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 		num_lbl->set_custom_minimum_size(Size2(THUMB_SIZE, 0));
 		num_lbl->set_tooltip_text(tip);
@@ -467,6 +413,7 @@ void ArtDirectorPanel::_on_images_completed(int p_result, int p_code, const Pack
 				info.category = "exploration";
 				info.label = img_info.get("label", "");
 				info.tooltip = img_info.get("tooltip", "");
+				info.style_num = img_info.get("styleNum", 0);
 				_load_thumbnail(String(img_info.get("absPath", "")), info);
 				si.images.push_back(info);
 			}
@@ -524,64 +471,6 @@ void ArtDirectorPanel::_on_images_completed(int p_result, int p_code, const Pack
 	_rebuild_gallery(cornerstone_gallery, cornerstone_thumbs, "cornerstone");
 }
 
-void ArtDirectorPanel::_on_models_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
-	models_request_in_progress = false;
-	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
-		struct ModelEntry { const char *id; const char *label; };
-		static const ModelEntry FALLBACK_MODELS[] = {
-			{ "nano-banana-2",       "nano-banana-2 ($0.067) - fast, pro-level" },
-			{ "flux-2-dev",          "flux-2-dev ($0.012) - FLUX.2 open-source" },
-			{ "flux-2-pro",          "flux-2-pro ($0.015) - FLUX.2 flagship" },
-			{ "flux-schnell",        "flux-schnell ($0.003) - fastest" },
-			{ "flux-kontext-pro",    "flux-kontext-pro ($0.04) - style consistent" },
-			{ "flux-kontext-max",    "flux-kontext-max ($0.06) - best quality" },
-			{ "sd-3.5-medium",       "sd-3.5-medium ($0.035)" },
-			{ "sd-3.5-large-turbo",  "sd-3.5-large-turbo ($0.04)" },
-			{ "sdxl",                "sdxl ($0.0055)" },
-		};
-		model_picker->clear();
-		for (const ModelEntry &m : FALLBACK_MODELS) {
-			model_picker->add_item(m.label);
-			model_picker->set_item_metadata(model_picker->get_item_count() - 1, String(m.id));
-		}
-		_populate_model_picker(model_picker, "nano-banana-2");
-		return;
-	}
-
-	String body_str = String::utf8((const char *)p_body.ptr(), p_body.size());
-	JSON json;
-	if (json.parse(body_str) != OK) {
-		return;
-	}
-
-	Dictionary data = json.get_data();
-	Array models = data.get("models", Array());
-
-	if (models.is_empty()) {
-		return;
-	}
-
-	model_picker->clear();
-
-	for (int i = 0; i < models.size(); i++) {
-		Dictionary m = models[i];
-		String id = m.get("id", "");
-		String cost_str = "";
-		if (m.has("pricing")) {
-			Dictionary pricing = m["pricing"];
-			if (pricing.has("cost")) {
-				cost_str = " ($" + String::num(double(pricing["cost"]), 4) + ")";
-			}
-		}
-		String label = id + cost_str;
-
-		model_picker->add_item(label);
-		model_picker->set_item_metadata(model_picker->get_item_count() - 1, id);
-	}
-
-	_populate_model_picker(model_picker, "flux-2-dev");
-}
-
 // ── UI callbacks ─────────────────────────────────────────────────────────────
 
 void ArtDirectorPanel::_on_open_image_pressed(String p_abs_path) {
@@ -618,6 +507,9 @@ void ArtDirectorPanel::_on_cornerstone_refresh_pressed() {
 }
 
 void ArtDirectorPanel::_on_gallery_refresh_timeout() {
+	if (!is_visible_in_tree()) {
+		return;
+	}
 	_refresh_images();
 	_refresh_profile();
 }

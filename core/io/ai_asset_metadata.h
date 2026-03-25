@@ -124,7 +124,7 @@ public:
 	static Vector<String> get_bundle_members(const String &p_path);
 	static Error link_bundle_assets(const Vector<String> &p_paths, const String &p_bundle_id);
 
-	// Version history (.ai.{filename}/ folder)
+	// Version history (.ai.{name}/ folder, extension-agnostic)
 	static String get_version_dir(const String &p_asset_path);
 	static String get_version_file_path(const String &p_asset_path, int p_version);
 	static String get_version_meta_path(const String &p_asset_path, int p_version);

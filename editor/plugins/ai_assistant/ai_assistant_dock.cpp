@@ -2,7 +2,7 @@
 /*  ai_assistant_dock.cpp                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
-/*                           MAKABAKA ENGINE                              */
+/*                           BLURED ENGINE                                */
 /*                    AI-powered game creation module                     */
 /**************************************************************************/
 
@@ -88,6 +88,8 @@ void AIAssistantDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_on_wizard_image_model_selected", "index"), &AIAssistantDock::_on_wizard_image_model_selected);
 	ClassDB::bind_method(D_METHOD("_on_wizard_fetch_rembg_method_completed", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_fetch_rembg_method_completed);
 	ClassDB::bind_method(D_METHOD("_on_wizard_rembg_method_selected", "index"), &AIAssistantDock::_on_wizard_rembg_method_selected);
+	ClassDB::bind_method(D_METHOD("_on_wizard_fetch_vision_model_completed", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_fetch_vision_model_completed);
+	ClassDB::bind_method(D_METHOD("_on_wizard_vision_model_selected", "index"), &AIAssistantDock::_on_wizard_vision_model_selected);
 	ClassDB::bind_method(D_METHOD("_on_wizard_settings_saved", "result", "code", "headers", "body"), &AIAssistantDock::_on_wizard_settings_saved);
 	ClassDB::bind_method(D_METHOD("_on_settings_pressed"), &AIAssistantDock::_on_settings_pressed);
 	ClassDB::bind_method(D_METHOD("_on_new_instance_pressed"), &AIAssistantDock::_on_new_instance_pressed);
@@ -1109,6 +1111,10 @@ void AIAssistantDock::_send_message(const String &p_content) {
 	}
 	_add_log_entry("USER", prompt_preview, Color(0.4, 0.7, 1.0));
 
+	// Skip all already-completed assistant messages until a new in-progress one appears.
+	// Without this, the poll loop would re-render the previous response as a duplicate.
+	waiting_for_new_assistant = true;
+
 	// Start polling for intermediate steps (tool activities)
 	_start_stream_polling("");
 
@@ -1216,10 +1222,9 @@ void AIAssistantDock::_send_message(const String &p_content) {
 		body["model"] = model;
 	}
 
-	// Include thinking variant when toggle is on
-	if (thinking_toggle->is_pressed()) {
-		body["variant"] = "high";
-	}
+	// Include thinking variant - always send to control provider thinking behavior
+	// Use "low" (not "minimal") as floor since some models (gemini-3.1-pro) don't support "minimal"
+	body["variant"] = thinking_toggle->is_pressed() ? "high" : "low";
 
 	// Include auto-test flag (OpenCode injects the instruction into system prompt)
 	if (autotest_toggle->is_pressed()) {
@@ -1546,7 +1551,7 @@ void AIAssistantDock::_on_setup_pressed() {
 			"photoroom": {"name": "PhotoRoom", "services": ["background-removal"], "keyPrefix": "sk_pr_"},
 			"meshy": {"name": "Meshy", "services": ["3d-generation"], "keyPrefix": "msy_"},
 			"suno": {"name": "Suno", "services": ["music-generation"]},
-			"doubao": {"name": "Doubao", "services": ["chat", "image-generation"]},
+			"volcengine": {"name": "Volcengine", "services": ["chat", "image-generation"]},
 			"local_rmbg": {"name": "RMBG-2.0", "services": ["background-removal"], "local": true, "healthCheck": "/ai-assets/rmbg-health"}
 		})";
 		Variant parsed = JSON::parse_string(json_str);
@@ -1708,6 +1713,36 @@ void AIAssistantDock::_setup_wizard_ui() {
 	wizard_rembg_no_provider_label->set_visible(false);
 	wizard_pages[1]->add_child(wizard_rembg_no_provider_label);
 
+	// -- Vision Model (for UI Measurement) --
+	wizard_vision_model_container = memnew(VBoxContainer);
+	wizard_vision_model_container->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	wizard_pages[1]->add_child(wizard_vision_model_container);
+
+	{
+		HBoxContainer *row = memnew(HBoxContainer);
+		row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+
+		Label *name_label = memnew(Label);
+		name_label->set_text("Vision Model");
+		name_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		row->add_child(name_label);
+
+		wizard_vision_model_selector = memnew(OptionButton);
+		wizard_vision_model_selector->set_auto_translate(false);
+		wizard_vision_model_selector->set_custom_minimum_size(Size2(250, 0));
+		wizard_vision_model_selector->connect("item_selected", Callable(this, "_on_wizard_vision_model_selected"));
+		row->add_child(wizard_vision_model_selector);
+
+		wizard_vision_model_container->add_child(row);
+	}
+
+	wizard_vision_no_provider_label = memnew(Label);
+	wizard_vision_no_provider_label->set_text("No vision-capable provider connected.");
+	wizard_vision_no_provider_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	wizard_vision_no_provider_label->add_theme_color_override("font_color", Color(0.6, 0.6, 0.6));
+	wizard_vision_no_provider_label->set_visible(false);
+	wizard_pages[1]->add_child(wizard_vision_no_provider_label);
+
 	// === Navigation buttons (outside scroll so always visible) ===
 	outer->add_child(memnew(HSeparator));
 
@@ -1756,6 +1791,8 @@ void AIAssistantDock::_wizard_show_step(int p_step) {
 		_wizard_fetch_current_image_model();
 		_wizard_populate_rembg_methods();
 		_wizard_fetch_current_rembg_method();
+		_wizard_populate_vision_models();
+		_wizard_fetch_current_vision_model();
 	}
 }
 
@@ -1910,6 +1947,96 @@ void AIAssistantDock::_on_wizard_fetch_rembg_method_completed(int p_result, int 
 	}
 }
 
+void AIAssistantDock::_wizard_populate_vision_models() {
+	wizard_vision_model_selector->clear();
+
+	bool has_any = false;
+
+	bool anthropic_connected = wizard_connected.has("anthropic") && wizard_connected["anthropic"];
+	bool google_connected = wizard_connected.has("google") && wizard_connected["google"];
+	bool volcengine_connected = wizard_connected.has("volcengine") && wizard_connected["volcengine"];
+
+	if (anthropic_connected) {
+		wizard_vision_model_selector->add_item("Claude Opus 4.6 (Anthropic)");
+		wizard_vision_model_selector->set_item_metadata(wizard_vision_model_selector->get_item_count() - 1, "anthropic/claude-opus-4-6");
+		wizard_vision_model_selector->add_item("Claude Sonnet 4.6 (Anthropic)");
+		wizard_vision_model_selector->set_item_metadata(wizard_vision_model_selector->get_item_count() - 1, "anthropic/claude-sonnet-4-6");
+		has_any = true;
+	}
+	if (google_connected) {
+		wizard_vision_model_selector->add_item("Gemini 3.1 Pro (Google)");
+		wizard_vision_model_selector->set_item_metadata(wizard_vision_model_selector->get_item_count() - 1, "google/gemini-3.1-pro-preview");
+		wizard_vision_model_selector->add_item("Gemini 3 Flash (Google)");
+		wizard_vision_model_selector->set_item_metadata(wizard_vision_model_selector->get_item_count() - 1, "google/gemini-3-flash-preview");
+		has_any = true;
+	}
+	if (volcengine_connected) {
+		wizard_vision_model_selector->add_item("Doubao Seed 1.6 Vision (Volcengine)");
+		wizard_vision_model_selector->set_item_metadata(wizard_vision_model_selector->get_item_count() - 1, "volcengine/doubao-seed-1-6-vision-250815");
+		has_any = true;
+	}
+
+	// Pre-select based on last known model (default to anthropic/claude-sonnet-4-6)
+	String target = wizard_current_vision_model.is_empty() ? "anthropic/claude-sonnet-4-6" : wizard_current_vision_model;
+	if (has_any) {
+		for (int i = 0; i < wizard_vision_model_selector->get_item_count(); i++) {
+			if (wizard_vision_model_selector->get_item_metadata(i) == target) {
+				wizard_vision_model_selector->select(i);
+				wizard_current_vision_model = target;
+				break;
+			}
+		}
+		// If target not found, select first item
+		if (wizard_current_vision_model.is_empty() || wizard_current_vision_model != target) {
+			wizard_current_vision_model = wizard_vision_model_selector->get_item_metadata(0);
+		}
+	}
+
+	wizard_vision_model_container->set_visible(has_any);
+	wizard_vision_no_provider_label->set_visible(!has_any);
+}
+
+void AIAssistantDock::_wizard_fetch_current_vision_model() {
+	String url = service_url + "/ai-assets/vision-model";
+	Vector<String> headers = _get_headers_with_directory();
+	HTTPRequest *req = memnew(HTTPRequest);
+	add_child(req);
+	req->connect("request_completed", Callable(this, "_on_wizard_fetch_vision_model_completed"));
+	req->connect("request_completed", callable_mp((Node *)req, &Node::queue_free).unbind(4));
+	req->request(url, headers, HTTPClient::METHOD_GET);
+}
+
+void AIAssistantDock::_on_wizard_fetch_vision_model_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body) {
+	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != 200) {
+		return;
+	}
+	String body_str = _body_to_string(p_body);
+	Ref<JSON> json;
+	json.instantiate();
+	if (json->parse(body_str) != OK) {
+		return;
+	}
+	Dictionary data = json->get_data();
+	if (data.has("model")) {
+		String saved_model = data["model"];
+		if (saved_model.is_empty()) {
+			return;
+		}
+		bool found = false;
+		for (int i = 0; i < wizard_vision_model_selector->get_item_count(); i++) {
+			if (wizard_vision_model_selector->get_item_metadata(i) == saved_model) {
+				wizard_vision_model_selector->select(i);
+				wizard_current_vision_model = saved_model;
+				found = true;
+				break;
+			}
+		}
+		if (!found && wizard_vision_model_selector->get_item_count() > 0) {
+			wizard_current_vision_model = wizard_vision_model_selector->get_item_metadata(wizard_vision_model_selector->get_selected());
+		}
+	}
+}
+
 void AIAssistantDock::_on_wizard_back() {
 	if (wizard_step > 0) {
 		_wizard_show_step(wizard_step - 1);
@@ -1942,6 +2069,9 @@ void AIAssistantDock::_on_wizard_finish() {
 	}
 	if (!wizard_current_rembg_method.is_empty()) {
 		body["removebg_method"] = wizard_current_rembg_method;
+	}
+	if (!wizard_current_vision_model.is_empty()) {
+		body["vision_model"] = wizard_current_vision_model;
 	}
 	if (!body.is_empty()) {
 		String url = service_url + "/ai-assets/wizard-settings";
@@ -1987,6 +2117,13 @@ void AIAssistantDock::_on_wizard_finish() {
 		msg += "[color=green]* Background Removal: " + method_label + "[/color]\n";
 	} else {
 		msg += "[color=gray]* Background Removal - skipped[/color]\n";
+	}
+
+	// Vision model
+	if (!wizard_current_vision_model.is_empty()) {
+		msg += "[color=green]* Vision Model: " + wizard_current_vision_model + "[/color]\n";
+	} else {
+		msg += "[color=gray]* Vision Model - skipped[/color]\n";
 	}
 
 	msg += "\nYou can reconfigure anytime by clicking the key icon in the toolbar.";
@@ -2426,6 +2563,14 @@ void AIAssistantDock::_on_wizard_rembg_method_selected(int p_index) {
 	wizard_current_rembg_method = wizard_rembg_method_selector->get_item_metadata(p_index);
 }
 
+void AIAssistantDock::_on_wizard_vision_model_selected(int p_index) {
+	if (p_index < 0 || p_index >= wizard_vision_model_selector->get_item_count()) {
+		return;
+	}
+	// Track selection locally; saved on Finish
+	wizard_current_vision_model = wizard_vision_model_selector->get_item_metadata(p_index);
+}
+
 void AIAssistantDock::_on_settings_pressed() {
 	// Load project prompt (CLAUDE.md)
 	project_prompt_edit->set_text(_load_project_prompt());
@@ -2473,7 +2618,7 @@ void AIAssistantDock::_save_project_prompt(const String &p_content) {
 		f->store_string(p_content);
 		_add_system_message("[System] Project prompt saved to CLAUDE.md");
 	} else {
-		_add_system_message("[System] Failed to save CLAUDE.md — check file permissions.");
+		_add_system_message("[System] Failed to save CLAUDE.md -- check file permissions.");
 	}
 }
 
@@ -2486,7 +2631,7 @@ String AIAssistantDock::_generate_project_prompt_template() {
 	String project_dir = _get_project_directory();
 	String tmpl;
 
-	tmpl += "# " + project_name + " — AI Development Guide\n\n";
+	tmpl += "# " + project_name + " -- AI Development Guide\n\n";
 	tmpl += "## Project Overview\n";
 	tmpl += "[Brief description of the game, genre, target platform]\n\n";
 
@@ -2516,7 +2661,7 @@ String AIAssistantDock::_generate_project_prompt_template() {
 	tmpl += "[List key asset directories and what they contain]\n\n";
 
 	tmpl += "## Architecture\n";
-	tmpl += "[Key technical decisions — composition, data-driven, etc.]\n\n";
+	tmpl += "[Key technical decisions -- composition, data-driven, etc.]\n\n";
 
 	tmpl += "## Rules\n";
 	tmpl += "[Project-specific coding rules or constraints]\n";
@@ -3215,7 +3360,7 @@ void AIAssistantDock::_process_local_command(const String &p_prompt) {
 	String lower = p_prompt.to_lower();
 
 	if (lower.contains("help")) {
-		_add_ai_message("**RedBlue AI Help**\n\n**Quick Commands:**\n- run / play - Run the project\n- stop - Stop the project\n- save - Save the current scene\n\n**Full AI Features:**\nClick 'Connect' to connect to the AI service (http://localhost:13700).\n\nMake sure the AI server is running with the RedBlue launcher.");
+		_add_ai_message("**Blured Engine Help**\n\n**Quick Commands:**\n- run / play - Run the project\n- stop - Stop the project\n- save - Save the current scene\n\n**Full AI Features:**\nClick 'Connect' to connect to the AI service (http://localhost:13700).\n\nMake sure the AI server is running with the Blured launcher.");
 	} else if (lower.contains("run") || lower.contains("play")) {
 		EditorInterface::get_singleton()->play_main_scene();
 		_add_ai_message("Running project...");
@@ -3566,11 +3711,9 @@ void AIAssistantDock::_show_welcome_message() {
 	welcome->set_fit_content(true);
 	welcome->set_selection_enabled(true);
 
-	String msg = "[color=gray]Welcome to RedBlue AI![/color]\n\n";
+	String msg = "[color=gray]Welcome to Blured Engine![/color]\n\n";
 	msg += "[color=cyan]Start creating:[/color]\n";
-	msg += "- \"Create a 2D platformer\" — guided game creation\n";
-	msg += "- /create-game — step-by-step workflow\n";
-	msg += "- /worldbuilding — build your game world\n\n";
+	msg += "- \"Create a 2D platformer\" -- guided game creation\n\n";
 	msg += "[color=cyan]Quick help:[/color]\n";
 	msg += "- \"Add a player character\"\n";
 	msg += "- \"Fix the enemy AI\"\n";
@@ -4349,6 +4492,22 @@ void AIAssistantDock::_on_stream_http_request_completed(int p_result, int p_code
 		}
 	}
 
+	// When waiting for a new response, find the index of the last user message.
+	// Only assistant messages AFTER the last user message belong to the new exchange.
+	int earliest_valid_assistant_idx = 0;
+	if (waiting_for_new_assistant) {
+		for (int i = messages.size() - 1; i >= 0; i--) {
+			Dictionary msg = messages[i];
+			if (msg.has("info")) {
+				Dictionary info = msg["info"];
+				if (String(info.get("role", "")) == "user") {
+					earliest_valid_assistant_idx = i + 1;
+					break;
+				}
+			}
+		}
+	}
+
 	// Find the latest assistant message, skipping any aborted/stale message.
 	Dictionary latest_assistant;
 	for (int i = messages.size() - 1; i >= 0; i--) {
@@ -4363,6 +4522,12 @@ void AIAssistantDock::_on_stream_http_request_completed(int p_result, int p_code
 				// Skip explicitly ignored message (set by _on_stop_pressed)
 				if (!ignore_assistant_message_id.is_empty() && msg_id == ignore_assistant_message_id) {
 					continue;
+				}
+
+				// Skip assistant messages that appear before the last user message
+				// (they belong to a previous exchange and were already rendered).
+				if (waiting_for_new_assistant && i < earliest_valid_assistant_idx) {
+					break; // No point checking even older messages
 				}
 
 				// Skip compaction summary messages — we already displayed the compact indicator
@@ -4388,6 +4553,8 @@ void AIAssistantDock::_on_stream_http_request_completed(int p_result, int p_code
 				}
 
 				latest_assistant = msg;
+				// Found the new assistant message — stop skipping old ones.
+				waiting_for_new_assistant = false;
 				break;
 			}
 		}
@@ -4412,7 +4579,7 @@ void AIAssistantDock::_on_stream_http_request_completed(int p_result, int p_code
 			_stop_stream_polling();
 			_hide_processing();
 			pending_request = REQUEST_NONE;
-			_add_system_message("AI response timed out. Your session is preserved — try sending your message again.");
+			_add_system_message("AI response timed out. Your session is preserved -- try sending your message again.");
 			_update_status("Connected", Color(0, 1, 0));
 		}
 		return;
@@ -4626,7 +4793,7 @@ void AIAssistantDock::_on_stream_http_request_completed(int p_result, int p_code
 			msg_container->add_child(label);
 			chat_container->add_child(msg_container);
 
-			_add_log_entry("INFO", "Context compacted — continuing with fresh context", Color(0.8, 0.8, 0.5));
+			_add_log_entry("INFO", "Context compacted -- continuing with fresh context", Color(0.8, 0.8, 0.5));
 
 			// Don't stop polling — the server will produce a real response next.
 			// Reset message tracking so we pick up the next assistant message.
@@ -5064,7 +5231,7 @@ void AIAssistantDock::_execute_godot_command(const String &p_action, const Dicti
 		}
 
 		if (!EditorRunBar::get_singleton()->is_playing()) {
-			_post_eval_result(eval_id, "", "No game running — start the game first.");
+			_post_eval_result(eval_id, "", "No game running -- start the game first.");
 			return;
 		}
 
@@ -5462,9 +5629,15 @@ void AIAssistantDock::_image_process_worker(const String &p_id, const String &p_
 			int new_h = img->get_height() + pad_top + pad_bottom;
 
 			Color bg = Color::html(color_str);
+			// Ensure RGBA format when padding with transparent color
+			Image::Format fmt = img->get_format();
+			if (bg.a < 1.0f && (fmt == Image::FORMAT_RGB8 || fmt == Image::FORMAT_L8)) {
+				img->convert(Image::FORMAT_RGBA8);
+				fmt = Image::FORMAT_RGBA8;
+			}
 			Ref<Image> padded;
 			padded.instantiate();
-			padded->initialize_data(new_w, new_h, false, img->get_format());
+			padded->initialize_data(new_w, new_h, false, fmt);
 			padded->fill(bg);
 			padded->blit_rect(img, Rect2i(0, 0, img->get_width(), img->get_height()), Point2i(pad_left, pad_top));
 			img = padded;
@@ -6042,7 +6215,7 @@ void AIAssistantDock::_toggle_gif_recording() {
 	if (!gif_recording) {
 		// Start recording
 		if (!EditorRunBar::get_singleton()->is_playing()) {
-			_add_system_message("[GIF] Cannot record — game is not running. Start the game first.");
+			_add_system_message("[GIF] Cannot record -- game is not running. Start the game first.");
 			gif_record_button->set_pressed_no_signal(false);
 			return;
 		}
@@ -6064,7 +6237,7 @@ void AIAssistantDock::_toggle_gif_recording() {
 		gif_record_button->remove_theme_color_override("font_color");
 
 		if (gif_frames.size() == 0) {
-			_add_system_message("[GIF] Recording stopped — no frames captured.");
+			_add_system_message("[GIF] Recording stopped -- no frames captured.");
 			return;
 		}
 
@@ -6702,7 +6875,7 @@ void AIAssistantDock::_on_provider_request_completed(int p_result, int p_code, c
 						"1. Click [b]Select Model[/b] in the toolbar above\n"
 						"2. Choose a provider (e.g. Anthropic, OpenAI, Google)\n"
 						"3. Follow the sign-in flow to authenticate\n\n"
-						"Free models are available immediately — or connect your own API key for premium models.");
+						"Free models are available immediately -- or connect your own API key for premium models.");
 				chat_container->add_child(guide);
 				_scroll_chat_to_bottom();
 			}
@@ -7245,7 +7418,8 @@ void AIAssistantDock::_hide_question_dialog() {
 		question_container->queue_free();
 	}
 	question_container = nullptr;
-	current_question_id = "";
+	// Keep current_question_id set so the poll loop (line 7181) doesn't
+	// re-show the same question before the server processes our reply.
 }
 
 void AIAssistantDock::_on_question_option_pressed(int p_option_index) {

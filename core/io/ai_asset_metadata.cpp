@@ -381,7 +381,7 @@ static Error _write_json_file(const String &p_path, const Dictionary &p_data) {
 }
 
 String AIAssetMetadata::get_version_dir(const String &p_asset_path) {
-	return p_asset_path.get_base_dir().path_join(".ai." + p_asset_path.get_file());
+	return p_asset_path.get_base_dir().path_join(".ai." + p_asset_path.get_file().get_basename());
 }
 
 String AIAssetMetadata::get_version_file_path(const String &p_asset_path, int p_version) {
@@ -620,9 +620,17 @@ Array AIAssetMetadata::list_versions(const String &p_asset_path) {
 		entry["is_current"] = (ver == current);
 		entry["file_exists"] = FileAccess::exists(get_version_file_path(p_asset_path, ver));
 
-		// Check for raw file (pre-post-processing output from AI model)
-		String raw_path = get_version_dir(p_asset_path).path_join(vformat("v%d_raw.%s", ver, p_asset_path.get_extension()));
-		entry["has_raw"] = FileAccess::exists(raw_path);
+		// Check for raw file (pre-post-processing output from AI model, may be .png or .jpg)
+		String ver_dir = get_version_dir(p_asset_path);
+		String raw_prefix = vformat("v%d_raw.", ver);
+		bool has_raw = false;
+		for (const String &ext : { "png", "jpg", "jpeg", "webp" }) {
+			if (FileAccess::exists(ver_dir.path_join(raw_prefix + ext))) {
+				has_raw = true;
+				break;
+			}
+		}
+		entry["has_raw"] = has_raw;
 
 		// Pass through post-processing and dimension info
 		entry["post_processing"] = ver_meta.get("post_processing", Array());

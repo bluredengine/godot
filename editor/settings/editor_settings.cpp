@@ -702,11 +702,11 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
 	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_PLACEHOLDER_TEXT, "ai/providers/meshy/api_url", "", "https://api.meshy.ai/openapi/v2")
 	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_ENUM, "ai/providers/meshy/default_model", "meshy-6", "meshy-6,meshy-5")
 
-	// Doubao (Volcano Engine) - 2D Image/Texture Generation
-	_initial_set("ai/providers/doubao/enabled", true);
-	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_PASSWORD, "ai/providers/doubao/api_key", "", "")
-	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_PLACEHOLDER_TEXT, "ai/providers/doubao/api_url", "", "https://visual.volcengineapi.com/v1")
-	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_ENUM, "ai/providers/doubao/default_model", "seedream-v4", "seedream-v4,seedream-v3")
+	// Volcengine (ByteDance) - 2D Image/Texture Generation
+	_initial_set("ai/providers/volcengine/enabled", true);
+	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_PASSWORD, "ai/providers/volcengine/api_key", "", "")
+	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_PLACEHOLDER_TEXT, "ai/providers/volcengine/api_url", "", "https://visual.volcengineapi.com/v1")
+	EDITOR_SETTING(Variant::STRING, PROPERTY_HINT_ENUM, "ai/providers/volcengine/default_model", "seedream-v4", "seedream-v4,seedream-v3")
 
 	// Suno - Audio/Music Generation
 	_initial_set("ai/providers/suno/enabled", true);
