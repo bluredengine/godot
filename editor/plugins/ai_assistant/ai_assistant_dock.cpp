@@ -949,12 +949,17 @@ String AIAssistantDock::_load_engine_prompts() {
 	}
 
 	// Locate the prompts/ directory relative to the engine executable.
-	// Executable is at: <engine_root>/godot/bin/godot.exe
-	// Prompts are at:   <engine_root>/prompts/
+	// Packaged layout: <root>/bin/blured.exe  -> ../prompts/
+	// Dev layout:      <root>/godot/bin/godot.exe -> ../../prompts/
 	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
-	String docs_dir = exe_dir.path_join("..").path_join("..").path_join("prompts").simplify_path();
+	String docs_dir = exe_dir.path_join("..").path_join("prompts").simplify_path();
 
 	Ref<DirAccess> dir = DirAccess::open(docs_dir);
+	if (dir.is_null()) {
+		// Fallback: dev layout (two levels up)
+		docs_dir = exe_dir.path_join("..").path_join("..").path_join("prompts").simplify_path();
+		dir = DirAccess::open(docs_dir);
+	}
 	if (dir.is_null()) {
 		print_line("[AIAssistant] Could not open prompts directory: " + docs_dir);
 		return "";
@@ -2673,9 +2678,14 @@ Vector<String> AIAssistantDock::_get_engine_prompt_files() {
 	Vector<String> result;
 
 	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
-	String prompts_dir = exe_dir.path_join("..").path_join("..").path_join("prompts").simplify_path();
+	// Packaged layout: ../prompts/  Dev layout: ../../prompts/
+	String prompts_dir = exe_dir.path_join("..").path_join("prompts").simplify_path();
 
 	Ref<DirAccess> dir = DirAccess::open(prompts_dir);
+	if (dir.is_null()) {
+		prompts_dir = exe_dir.path_join("..").path_join("..").path_join("prompts").simplify_path();
+		dir = DirAccess::open(prompts_dir);
+	}
 	if (dir.is_null()) {
 		return result;
 	}
